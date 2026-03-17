@@ -7,6 +7,8 @@ import { walletService } from '../services/walletService';
 import { cardService } from '../services/cardService';
 import { savingsService } from '../services/savingsService';
 import { analyticsService } from '../services/analyticsService';
+import { rewardsService } from '../services/rewardsService';
+import { notificationService } from '../services/notificationService';
 import { apiClient, clearSessionToken, normalizeApiError } from '../services/apiClient';
 
 const AppDataContext = createContext(null);
@@ -23,6 +25,10 @@ export function AppDataProvider({ children }) {
   const [savingsSummary, setSavingsSummary] = useState({ total_saved: 0, total_target: 0, active_goals: 0 });
   const [analyticsOverview, setAnalyticsOverview] = useState(null);
   const [healthScore, setHealthScore] = useState(null);
+  const [rewards, setRewards] = useState(null);
+  const [rewardOffers, setRewardOffers] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationMeta, setNotificationMeta] = useState({ unreadCount: 0, pagination: { page: 1, limit: 5, total: 0, pages: 0 } });
   const [loading, setLoading] = useState({
     bootstrap: true,
     profile: false,
@@ -32,6 +38,8 @@ export function AppDataProvider({ children }) {
     cards: false,
     savings: false,
     analytics: false,
+    rewards: false,
+    notifications: false,
   });
   const [toasts, setToasts] = useState([]);
 
@@ -96,9 +104,11 @@ export function AppDataProvider({ children }) {
       cards: true,
       savings: true,
       analytics: true,
+      rewards: true,
+      notifications: true,
     }));
 
-    const [profileRes, walletRes, prefsRes, linkedRes, cardsRes, savingsRes, overviewRes, healthRes] = await Promise.allSettled([
+    const [profileRes, walletRes, prefsRes, linkedRes, cardsRes, savingsRes, overviewRes, healthRes, rewardsRes, offersRes, notificationsRes] = await Promise.allSettled([
       userService.getProfile(),
       walletService.getWallet(),
       userService.getNotificationPreferences(),
@@ -107,6 +117,9 @@ export function AppDataProvider({ children }) {
       savingsService.getGoals(),
       analyticsService.getOverview(),
       analyticsService.getHealthScore(),
+      rewardsService.getRewards(),
+      rewardsService.getOffers(),
+      notificationService.getNotifications({ page: 1, limit: 5 }),
     ]);
 
     if (profileRes.status === 'fulfilled') {
@@ -151,6 +164,22 @@ export function AppDataProvider({ children }) {
       setHealthScore(healthRes.value);
     }
 
+    if (rewardsRes.status === 'fulfilled') {
+      setRewards(rewardsRes.value);
+    }
+
+    if (offersRes.status === 'fulfilled') {
+      setRewardOffers(offersRes.value);
+    }
+
+    if (notificationsRes.status === 'fulfilled') {
+      setNotifications(notificationsRes.value.items);
+      setNotificationMeta({
+        unreadCount: notificationsRes.value.unreadCount,
+        pagination: notificationsRes.value.pagination,
+      });
+    }
+
     setLoading({
       bootstrap: false,
       profile: false,
@@ -160,6 +189,8 @@ export function AppDataProvider({ children }) {
       cards: false,
       savings: false,
       analytics: false,
+      rewards: false,
+      notifications: false,
     });
   }, [pushToast]);
 
@@ -262,6 +293,33 @@ export function AppDataProvider({ children }) {
     }
   }, []);
 
+  const refreshRewards = useCallback(async () => {
+    setLoading((current) => ({ ...current, rewards: true }));
+    try {
+      const [rewardSummary, offers] = await Promise.all([
+        rewardsService.getRewards(),
+        rewardsService.getOffers(),
+      ]);
+      setRewards(rewardSummary);
+      setRewardOffers(offers);
+      return { rewardSummary, offers };
+    } finally {
+      setLoading((current) => ({ ...current, rewards: false }));
+    }
+  }, []);
+
+  const refreshNotifications = useCallback(async (params = { page: 1, limit: 5 }) => {
+    setLoading((current) => ({ ...current, notifications: true }));
+    try {
+      const result = await notificationService.getNotifications(params);
+      setNotifications(result.items);
+      setNotificationMeta({ unreadCount: result.unreadCount, pagination: result.pagination });
+      return result;
+    } finally {
+      setLoading((current) => ({ ...current, notifications: false }));
+    }
+  }, []);
+
   const withdrawFunds = useCallback(async (payload) => {
     const result = await walletService.withdraw(payload);
     updateWalletSnapshot(result.wallet, result.transaction);
@@ -320,6 +378,50 @@ export function AppDataProvider({ children }) {
     return result;
   }, [refreshAnalytics, refreshSavings, updateWalletSnapshot]);
 
+  const activateRewardOffer = useCallback(async (offerId) => {
+    const result = await rewardsService.activateOffer(offerId);
+    setRewardOffers((current) => current.map((offer) => (offer.id === offerId ? { ...offer, active: true } : offer)));
+    refreshNotifications();
+    return result;
+  }, [refreshNotifications]);
+
+  const redeemRewardPoints = useCallback(async (pointsToRedeem) => {
+    const result = await rewardsService.redeemPoints(pointsToRedeem);
+    updateWalletSnapshot(result.wallet || null, null);
+    await refreshRewards();
+    refreshNotifications();
+    return result;
+  }, [refreshNotifications, refreshRewards, updateWalletSnapshot]);
+
+  const markNotificationRead = useCallback(async (notificationId) => {
+    await notificationService.markRead(notificationId);
+    setNotifications((current) => current.map((item) => (item.id === notificationId ? { ...item, read: true } : item)));
+    setNotificationMeta((current) => ({ ...current, unreadCount: Math.max(0, current.unreadCount - 1) }));
+  }, []);
+
+  const markAllNotificationsRead = useCallback(async () => {
+    await notificationService.markAllRead();
+    setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+    setNotificationMeta((current) => ({ ...current, unreadCount: 0 }));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const token = window.localStorage.getItem('accessToken');
+    if (!token) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      refreshNotifications({ page: 1, limit: 5 }).catch(() => {});
+    }, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, [refreshNotifications]);
+
   const createCard = useCallback(async (payload) => {
     const card = await cardService.createCard(payload);
     setCards((current) => [card, ...current]);
@@ -370,6 +472,10 @@ export function AppDataProvider({ children }) {
     savingsSummary,
     analyticsOverview,
     healthScore,
+    rewards,
+    rewardOffers,
+    notifications,
+    notificationMeta,
     notificationPreferences,
     linkedAccounts,
     loading,
@@ -379,6 +485,8 @@ export function AppDataProvider({ children }) {
     refreshCards,
     refreshSavings,
     refreshAnalytics,
+    refreshRewards,
+    refreshNotifications,
     updateProfile,
     uploadAvatar,
     saveNotificationPreferences,
@@ -392,6 +500,10 @@ export function AppDataProvider({ children }) {
     updateSavingsGoal,
     contributeToSavingsGoal,
     deleteSavingsGoal,
+    activateRewardOffer,
+    redeemRewardPoints,
+    markNotificationRead,
+    markAllNotificationsRead,
     createCard,
     updateCardStatus,
     updateCardLimits,
@@ -406,6 +518,10 @@ export function AppDataProvider({ children }) {
     savingsSummary,
     analyticsOverview,
     healthScore,
+    rewards,
+    rewardOffers,
+    notifications,
+    notificationMeta,
     notificationPreferences,
     linkedAccounts,
     loading,
@@ -415,6 +531,8 @@ export function AppDataProvider({ children }) {
     refreshCards,
     refreshSavings,
     refreshAnalytics,
+    refreshRewards,
+    refreshNotifications,
     updateProfile,
     uploadAvatar,
     saveNotificationPreferences,
@@ -428,6 +546,10 @@ export function AppDataProvider({ children }) {
     updateSavingsGoal,
     contributeToSavingsGoal,
     deleteSavingsGoal,
+    activateRewardOffer,
+    redeemRewardPoints,
+    markNotificationRead,
+    markAllNotificationsRead,
     createCard,
     updateCardStatus,
     updateCardLimits,

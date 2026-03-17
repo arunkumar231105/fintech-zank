@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { ArrowDownLeft, ArrowUpRight, Landmark, Send, Wallet2, PieChart, PiggyBank } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Landmark, Send, Wallet2, PieChart, PiggyBank, Gift } from 'lucide-react';
 import { useAppData } from '../../../../src/context/AppDataContext';
 import { formatCurrency, formatDateTime } from '../../../../src/utils/dashboard';
 
@@ -35,7 +35,7 @@ function QuickAction({ href, label, icon: Icon, color }) {
 }
 
 export default function UserOverview() {
-  const { user, wallet, linkedAccounts, analyticsOverview, healthScore, savingsSummary } = useAppData();
+  const { user, wallet, linkedAccounts, analyticsOverview, healthScore, savingsSummary, rewards } = useAppData();
 
   if (!wallet) {
     return (
@@ -171,7 +171,7 @@ export default function UserOverview() {
         </div>
       </div>
 
-      <div className="grid-dashboard" style={{ gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
+      <div className="grid-dashboard" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 20, marginTop: 20 }}>
         <div className="card">
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-2">
@@ -252,6 +252,33 @@ export default function UserOverview() {
           </div>
           <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
             {healthScore?.tips?.[0] || 'Refresh analytics after more transactions to see personalized tips.'}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-2">
+              <Gift size={18} color="var(--warning)" />
+              <h2 className="heading-md">Rewards Overview</h2>
+            </div>
+            <Link href="/user/rewards" className="btn btn-ghost btn-sm">View offers</Link>
+          </div>
+          <div className="grid-dashboard cols-2 mb-4">
+            <div className="card" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: 4 }}>Points</div>
+              <div style={{ fontWeight: 700 }}>{rewards?.totalPoints || 0}</div>
+            </div>
+            <div className="card" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: 4 }}>Streak</div>
+              <div style={{ fontWeight: 700 }}>{rewards?.streakDays || 0} days</div>
+            </div>
+          </div>
+          <div className="card" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: 4 }}>Next reward unlock</div>
+            <div style={{ fontWeight: 700 }}>{rewards?.nextUnlock || 0} pts remaining</div>
+            <div className="progress-bar-wrap mt-3">
+              <div className="progress-bar-fill" style={{ width: `${rewards?.nextTierPoints ? Math.min((rewards.totalPoints / rewards.nextTierPoints) * 100, 100) : 0}%`, background: 'var(--grad-primary)' }} />
+            </div>
           </div>
         </div>
       </div>

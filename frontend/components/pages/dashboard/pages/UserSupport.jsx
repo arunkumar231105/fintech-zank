@@ -1,152 +1,217 @@
-import React, { useState } from 'react';
-import { MessageCircle, HelpCircle, ChevronDown, ChevronUp, Send, Ticket, Phone, Mail } from 'lucide-react';
-import { supportTickets } from '../../../data/mockData';
+'use client';
 
-const faqs = [
-  { q: 'How do I transfer money to another Zank user?', a: 'Go to Quick Actions on your Overview, click "Send", enter the recipient\'s email or @username, enter the amount, and confirm. Internal transfers are instant.' },
-  { q: 'My card was declined internationally — why?', a: 'By default, international payments are disabled for security. Go to Cards → Merchant Controls → International Payments → Enable.' },
-  { q: 'How does wallet funding work?', a: 'Wallet balances are funded by approved admin credits or incoming transfers from other users.' },
-  { q: 'How can I get my KYC re-verified?', a: 'Go to Security & KYC and complete the remaining verification steps. If you need to update documents, contact support.' },
-];
+import React, { useEffect, useMemo, useState } from 'react';
+import { MessageCircle, Send, Ticket } from 'lucide-react';
+import { supportService } from '../../../../src/services/supportService';
 
-const userTickets = supportTickets.filter(t => t.user === 'Jordan Rivera');
+const priorities = ['low', 'medium', 'high'];
 
 export default function UserSupport() {
-  const [openFaq, setOpenFaq] = useState(null);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [tickets, setTickets] = useState([]);
+  const [selectedTicketId, setSelectedTicketId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ subject: '', description: '', priority: 'medium', attachment: null });
   const [message, setMessage] = useState('');
-  const [chatMsgs, setChatMsgs] = useState([{ from: 'bot', text: "Hi Jordan! 👋 I'm Zank's AI support assistant. How can I help you today?" }]);
+  const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
-  const sendMsg = () => {
-    if (!message.trim()) return;
-    setChatMsgs(prev => [...prev, { from: 'user', text: message }, { from: 'bot', text: "Thanks for reaching out! A human agent will review this shortly. In the meantime, check our FAQ or common help topics below." }]);
-    setMessage('');
+  const loadTickets = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await supportService.getTickets();
+      setTickets(result);
+      if (!selectedTicketId && result[0]) {
+        setSelectedTicketId(result[0].id);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTickets();
+  }, []);
+
+  const selectedTicket = useMemo(
+    () => tickets.find((ticket) => ticket.id === selectedTicketId) || null,
+    [tickets, selectedTicketId]
+  );
+
+  const handleCreateTicket = async () => {
+    if (form.subject.trim().length < 5 || form.subject.trim().length > 100) {
+      setError('Ticket subject must be 5-100 chars');
+      return;
+    }
+    if (form.description.trim().length < 20 || form.description.trim().length > 500) {
+      setError('Description must be 20-500 chars');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      const ticket = await supportService.createTicket(form, (event) => {
+        if (event.total) {
+          setUploadProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      });
+      setTickets((current) => [ticket, ...current]);
+      setSelectedTicketId(ticket.id);
+      setShowCreate(false);
+      setForm({ subject: '', description: '', priority: 'medium', attachment: null });
+      setUploadProgress(0);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedTicket || !message.trim() || message.trim().length > 1000) {
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      const messages = await supportService.sendMessage({ ticketId: selectedTicket.id, message });
+      setTickets((current) => current.map((ticket) => (
+        ticket.id === selectedTicket.id ? { ...ticket, messages } : ticket
+      )));
+      setMessage('');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Help & Support</h1>
-          <p className="page-subtitle">24/7 support center — we're here when you need us.</p>
+          <h1 className="page-title">Support</h1>
+          <p className="page-subtitle">Create tickets, review status, and message support from your dashboard.</p>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setChatOpen(true)}>
-          <MessageCircle size={14} /> Live Chat
+        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>
+          <Ticket size={14} /> Create Ticket
         </button>
       </div>
 
-      {/* Help Cards */}
-      <div className="grid-dashboard cols-3 mb-5">
-        {[
-          { icon: <MessageCircle size={24}/>, title: 'Live Chat', sub: 'Avg reply in 2 min', action: () => setChatOpen(true), badge: 'Online', badgeType: 'badge-success', color: 'var(--primary)' },
-          { icon: <Mail size={24}/>, title: 'Email Support', sub: 'support@zankmail.com', action: () => {}, badge: '< 2h reply', badgeType: 'badge-blue', color: 'var(--blue)' },
-          { icon: <Phone size={24}/>, title: 'Priority Line', sub: '+1 (800) ZANK-AI', action: () => {}, badge: 'Gold+ only', badgeType: 'badge-warning', color: 'var(--warning)' },
-        ].map((c, i) => (
-          <div key={i} className="card card-hover text-center" style={{cursor: 'pointer', padding: 28}} onClick={c.action}>
-            <div style={{width: 52, height: 52, borderRadius: 'var(--r-lg)', background: `${c.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', color: c.color}}>
-              {c.icon}
-            </div>
-            <div className="heading-md mb-1">{c.title}</div>
-            <div style={{fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: 12}}>{c.sub}</div>
-            <span className={`badge ${c.badgeType}`}>{c.badge}</span>
-          </div>
-        ))}
-      </div>
+      {error && <div className="card mb-4" style={{ color: 'var(--danger)' }}>{error}</div>}
 
-      <div className="grid-dashboard" style={{gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20}}>
-        {/* FAQ */}
-        <div className="card">
-          <div className="flex items-center gap-2 mb-4">
-            <HelpCircle size={20} color="var(--primary)" />
-            <h2 className="heading-md">Frequently Asked</h2>
-          </div>
-          <div className="flex flex-col gap-2">
-            {faqs.map((f, i) => (
-              <div key={i} style={{background: 'var(--bg-surface)', borderRadius: 'var(--r-md)', overflow: 'hidden'}}>
-                <button onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                  style={{width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', color: 'var(--text-main)', cursor: 'pointer', textAlign: 'left', fontWeight: 600, fontSize: '0.875rem'}}>
-                  {f.q}
-                  {openFaq === i ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
-                </button>
-                {openFaq === i && (
-                  <div style={{padding: '0 16px 14px', fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.7}}>
-                    {f.a}
-                  </div>
-                )}
-              </div>
+      {loading ? (
+        <div className="card" style={{ minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+          Loading support tickets...
+        </div>
+      ) : (
+        <div className="grid-dashboard" style={{ gridTemplateColumns: '0.9fr 1.1fr', gap: 20 }}>
+          <div className="card">
+            <h2 className="heading-md mb-4">Your Tickets</h2>
+            {tickets.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)' }}>No support tickets yet.</div>
+            ) : tickets.map((ticket) => (
+              <button
+                key={ticket.id}
+                className="card"
+                onClick={() => setSelectedTicketId(ticket.id)}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  background: ticket.id === selectedTicketId ? 'rgba(42,255,196,0.06)' : 'rgba(255,255,255,0.03)',
+                  border: ticket.id === selectedTicketId ? '1px solid var(--border-active)' : '1px solid var(--border-glass)',
+                  marginBottom: 12,
+                  padding: 16,
+                }}
+              >
+                <div className="flex justify-between items-center mb-2">
+                  <div style={{ fontWeight: 700 }}>{ticket.subject}</div>
+                  <span className={`badge ${ticket.status === 'resolved' ? 'badge-success' : ticket.status === 'in_progress' ? 'badge-warning' : ticket.status === 'closed' ? 'badge-muted' : 'badge-primary'}`}>{ticket.status}</span>
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{ticket.id} · {new Date(ticket.created_at).toLocaleDateString()}</div>
+              </button>
             ))}
           </div>
-        </div>
 
-        {/* Submit Ticket */}
-        <div className="card">
-          <div className="flex items-center gap-2 mb-4">
-            <Ticket size={20} color="var(--blue)" />
-            <h2 className="heading-md">Submit a Ticket</h2>
-          </div>
-          <div className="form-group mb-3">
-            <label className="form-label">Subject</label>
-            <input className="form-input" placeholder="e.g. Card not working abroad" />
-          </div>
-          <div className="form-group mb-3">
-            <label className="form-label">Category</label>
-            <select className="form-input">
-              <option>Card Issue</option>
-              <option>Transaction Problem</option>
-              <option>KYC & Identity</option>
-              <option>Billing & Fees</option>
-              <option>Account Access</option>
-              <option>Other</option>
-            </select>
-          </div>
-          <div className="form-group mb-4">
-            <label className="form-label">Description</label>
-            <textarea className="form-input" rows={4} placeholder="Describe your issue in detail..." style={{resize: 'vertical'}} />
-          </div>
-          <button className="btn btn-blue btn-full">Submit Ticket</button>
-
-          {userTickets.length > 0 && (
-            <div style={{marginTop: 24}}>
-              <div className="heading-sm mb-3">Your Tickets</div>
-              {userTickets.map(t => (
-                <div key={t.id} className="flex items-center gap-3" style={{padding: '10px 0', borderBottom: '1px solid var(--border-glass)'}}>
-                  <div style={{flex: 1}}>
-                    <div style={{fontWeight: 600, fontSize: '0.875rem'}}>{t.issue}</div>
-                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>{t.id} · {t.created}</div>
+          <div className="card">
+            {selectedTicket ? (
+              <>
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <h2 className="heading-md">{selectedTicket.subject}</h2>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{selectedTicket.id} · {selectedTicket.priority} priority · {new Date(selectedTicket.created_at).toLocaleString()}</div>
                   </div>
-                  <span className={`badge ${t.status === 'open' ? 'badge-primary' : t.status === 'in-progress' ? 'badge-warning' : 'badge-success'}`}>
-                    {t.status}
-                  </span>
+                  <span className={`badge ${selectedTicket.status === 'resolved' ? 'badge-success' : selectedTicket.status === 'in_progress' ? 'badge-warning' : selectedTicket.status === 'closed' ? 'badge-muted' : 'badge-primary'}`}>{selectedTicket.status}</span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+                <div className="card mb-4" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+                  <div style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{selectedTicket.description}</div>
+                  {selectedTicket.attachment_name && <div style={{ marginTop: 10, color: 'var(--text-muted)', fontSize: '0.8rem' }}>Attachment: {selectedTicket.attachment_name}</div>}
+                </div>
 
-      {/* Chat Modal */}
-      {chatOpen && (
-        <div style={{position: 'fixed', bottom: 24, right: 24, width: 360, zIndex: 300}}>
-          <div className="card" style={{borderRadius: 'var(--r-xl)', padding: 0, overflow: 'hidden', boxShadow: 'var(--shadow-lg)', border: '1px solid rgba(42,255,196,0.2)'}}>
-            <div style={{background: 'var(--grad-primary)', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-              <div className="flex items-center gap-2">
-                <MessageCircle size={18} color="#07080f" />
-                <span style={{fontWeight: 700, color: '#07080f'}}>Zank Support</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 280, marginBottom: 16 }}>
+                  {(selectedTicket.messages || []).map((item) => (
+                    <div key={item.id} style={{ display: 'flex', justifyContent: item.sender === 'user' ? 'flex-end' : 'flex-start' }}>
+                      <div style={{ maxWidth: '80%', padding: '12px 14px', borderRadius: item.sender === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: item.sender === 'user' ? 'var(--grad-primary)' : 'var(--bg-surface)', color: item.sender === 'user' ? '#07080f' : 'var(--text-main)' }}>
+                        <div style={{ fontSize: '0.86rem' }}>{item.message}</div>
+                        <div style={{ fontSize: '0.72rem', marginTop: 6, opacity: 0.7 }}>{new Date(item.timestamp).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <input className="form-input" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type a message..." onKeyDown={(event) => event.key === 'Enter' && handleSendMessage()} />
+                  <button className="btn btn-primary btn-sm" onClick={handleSendMessage} disabled={submitting}>
+                    <Send size={14} />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div style={{ minHeight: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                Select a ticket to view details.
               </div>
-              <button onClick={() => setChatOpen(false)} style={{background: 'rgba(0,0,0,0.15)', border: 'none', color: '#07080f', cursor: 'pointer', borderRadius: 6, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700}}>✕</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showCreate && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 220, background: 'rgba(2, 6, 23, 0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div className="card" style={{ width: '100%', maxWidth: 520 }}>
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="heading-lg">Create Support Ticket</h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowCreate(false)}>Close</button>
             </div>
-            <div style={{height: 280, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-surface)'}}>
-              {chatMsgs.map((m, i) => (
-                <div key={i} style={{display: 'flex', justifyContent: m.from === 'user' ? 'flex-end' : 'flex-start'}}>
-                  <div style={{maxWidth: '80%', padding: '10px 14px', borderRadius: m.from === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px', background: m.from === 'user' ? 'var(--grad-primary)' : 'var(--bg-card)', color: m.from === 'user' ? '#07080f' : 'var(--text-main)', fontSize: '0.8125rem', lineHeight: 1.5}}>
-                    {m.text}
-                  </div>
-                </div>
-              ))}
+            <div className="form-group mb-3">
+              <label className="form-label">Subject</label>
+              <input className="form-input" value={form.subject} onChange={(event) => setForm((current) => ({ ...current, subject: event.target.value }))} />
             </div>
-            <div style={{padding: '12px 14px', borderTop: '1px solid var(--border-glass)', display: 'flex', gap: 8, background: 'var(--bg-card)'}}>
-              <input className="form-input" placeholder="Type a message..." value={message} onChange={e => setMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()} style={{flex: 1, padding: '8px 12px'}} />
-              <button className="btn btn-primary btn-sm" onClick={sendMsg}><Send size={14} /></button>
+            <div className="form-group mb-3">
+              <label className="form-label">Priority</label>
+              <select className="form-input" value={form.priority} onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value }))}>
+                {priorities.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </div>
+            <div className="form-group mb-3">
+              <label className="form-label">Description</label>
+              <textarea className="form-input" rows={5} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+            </div>
+            <div className="form-group mb-4">
+              <label className="form-label">Attachment</label>
+              <input className="form-input" type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(event) => setForm((current) => ({ ...current, attachment: event.target.files?.[0] || null }))} />
+            </div>
+            {uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="progress-bar-wrap mb-4"><div className="progress-bar-fill" style={{ width: `${uploadProgress}%`, background: 'var(--grad-primary)' }} /></div>
+            )}
+            <div className="flex gap-3">
+              <button className="btn btn-outline flex-1" onClick={() => setShowCreate(false)} disabled={submitting}>Cancel</button>
+              <button className="btn btn-primary flex-1" onClick={handleCreateTicket} disabled={submitting}>
+                <MessageCircle size={14} /> {submitting ? 'Submitting...' : 'Submit Ticket'}
+              </button>
             </div>
           </div>
         </div>

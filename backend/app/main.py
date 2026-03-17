@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth, users, wallet, cards, savings, budgets, admin, analytics, rewards, security, transactions
+from .routers import auth, users, wallet, cards, savings, budgets, admin, analytics, rewards, security, transactions, notifications, support
 from .core.database import init_db
 
 app = FastAPI(
@@ -34,6 +34,8 @@ app.include_router(budgets.router,   prefix="/api/v1/budgets",   tags=["Budgets"
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Analytics"])
 app.include_router(rewards.router,   prefix="/api/v1/rewards",   tags=["Rewards"])
 app.include_router(security.router,  prefix="/api/v1/security",  tags=["Security"])
+app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])
+app.include_router(support.router,   prefix="/api/v1/support",   tags=["Support"])
 app.include_router(admin.router,     prefix="/api/v1/admin",     tags=["Admin"])
 
 

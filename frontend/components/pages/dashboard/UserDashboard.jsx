@@ -23,6 +23,7 @@ import UserRewards from './pages/UserRewards';
 import UserSecurity from './pages/UserSecurity';
 import UserSettings from './pages/UserSettings';
 import UserSupport from './pages/UserSupport';
+import UserNotifications from './pages/UserNotifications';
 
 const navItems = [
   { path: '', label: 'Overview', icon: LayoutDashboard },
@@ -34,6 +35,7 @@ const navItems = [
   { path: 'budgets', label: 'Budgets', icon: Target },
   { path: 'rewards', label: 'Rewards', icon: Gift },
   { path: 'security-kyc', label: 'Security & KYC', icon: ShieldCheck },
+  { path: 'notifications', label: 'Notifications', icon: Bell },
   { path: 'settings', label: 'Settings', icon: Settings },
   { path: 'support', label: 'Support', icon: HelpCircle },
 ];
@@ -48,42 +50,10 @@ const pageComponentMap = {
   budgets: <UserBudgets />,
   rewards: <UserRewards />,
   'security-kyc': <UserSecurity />,
+  notifications: <UserNotifications />,
   settings: <UserSettings />,
   support: <UserSupport />,
 };
-
-function buildNotifications(user, wallet, linkedAccounts) {
-  const items = [];
-
-  if (wallet && Number(wallet.availableBalance) <= 0) {
-    items.push({
-      id: 'wallet-empty',
-      title: 'Wallet balance is low',
-      body: 'Add funds to continue sending or withdrawing money.',
-      time: 'Now',
-    });
-  }
-
-  if (Array.isArray(linkedAccounts) && linkedAccounts.length === 0) {
-      items.push({
-      id: 'accounts-empty',
-      title: 'No linked bank account',
-      body: 'Link an account to enable secure withdrawals from your wallet.',
-      time: 'Now',
-    });
-  }
-
-  if (user && !user.isVerified) {
-    items.push({
-      id: 'user-unverified',
-      title: 'Complete account verification',
-      body: 'Verify your account to unlock all wallet actions.',
-      time: 'Now',
-    });
-  }
-
-  return items;
-}
 
 export default function UserDashboard() {
   const pathname = usePathname();
@@ -91,13 +61,12 @@ export default function UserDashboard() {
   const [collapsed, setCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
-  const { user, wallet, linkedAccounts, loading, logout } = useAppData();
+  const { user, notifications, notificationMeta, loading, logout, markNotificationRead, markAllNotificationsRead } = useAppData();
 
   const currentPath = (pathname || '/user').replace('/user', '').replace(/^\//, '');
   const sectionPath = currentPath.split('/')[0] || '';
   const currentPage = navItems.find((item) => item.path === sectionPath) || navItems[0];
   const PageComponent = pageComponentMap[sectionPath] || pageComponentMap[''];
-  const notifications = useMemo(() => buildNotifications(user, wallet, linkedAccounts), [user, wallet, linkedAccounts]);
 
   useEffect(() => {
     const handler = (event) => {
@@ -189,29 +158,35 @@ export default function UserDashboard() {
             <div ref={notifsRef} style={{ position: 'relative' }}>
               <button className="header-icon-btn" onClick={() => setShowNotifs((value) => !value)}>
                 <Bell size={17} />
-                {notifications.length > 0 && <span className="notif-dot" />}
+                {notificationMeta.unreadCount > 0 && <span className="notif-dot" />}
               </button>
               {showNotifs && (
                 <div className="notif-panel">
                   <div className="notif-header">
                     <span className="heading-sm">Notifications</span>
-                    <span className="badge badge-primary">{notifications.length} new</span>
+                    <div className="flex gap-2 items-center">
+                      <span className="badge badge-primary">{notificationMeta.unreadCount} unread</span>
+                      <button className="btn btn-ghost btn-sm" onClick={markAllNotificationsRead}>Mark all</button>
+                    </div>
                   </div>
                   {notifications.length === 0 && (
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '12px 0' }}>
                       No new notifications.
                     </div>
                   )}
-                  {notifications.map((notification) => (
-                    <div key={notification.id} className="notif-item unread">
-                      <div className="notif-dot-unread" />
+                  {notifications.slice(0, 5).map((notification) => (
+                    <button key={notification.id} className={`notif-item ${notification.read ? '' : 'unread'}`} onClick={() => markNotificationRead(notification.id)} style={{ width: '100%', background: 'transparent', border: 'none', textAlign: 'left' }}>
+                      {!notification.read && <div className="notif-dot-unread" />}
                       <div>
                         <div className="heading-sm">{notification.title}</div>
-                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 2 }}>{notification.body}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>{notification.time}</div>
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 2 }}>{notification.message}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>{new Date(notification.timestamp).toLocaleString()}</div>
                       </div>
-                    </div>
+                    </button>
                   ))}
+                  <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border-glass)' }}>
+                    <Link href="/user/notifications" className="btn btn-outline btn-sm btn-full" onClick={() => setShowNotifs(false)}>View All</Link>
+                  </div>
                 </div>
               )}
             </div>
