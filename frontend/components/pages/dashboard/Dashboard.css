@@ -3,7 +3,8 @@
 =========================== */
 .dash-wrap {
   display: flex;
-  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
   background: var(--bg-surface);
   position: relative;
@@ -633,6 +634,7 @@
 @media (max-width: 900px) {
   .cols-3 { grid-template-columns: repeat(2, 1fr); }
   .dash-main { padding: 24px 20px; }
+  .dash-header { padding: 0 16px; }
 }
 
 @media (max-width: 768px) {
@@ -680,10 +682,48 @@
   .cols-4, .cols-3, .cols-2 { grid-template-columns: 1fr; }
   .col-span-2, .col-span-3 { grid-column: span 1; }
   .notif-panel { width: calc(100vw - 32px); right: -8px; }
+  .dash-header {
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .header-page-title {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .header-actions { gap: 6px; }
+  .header-icon-btn,
+  .header-hamburger {
+    width: 34px;
+    height: 34px;
+  }
+  .page-header { margin-bottom: 20px; }
+  .tx-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .tx-amount-col {
+    width: 100%;
+    text-align: left;
+    padding-left: 54px;
+  }
+  .table-wrap { -webkit-overflow-scrolling: touch; }
 }
 
 @media (max-width: 480px) {
   .dash-main { padding: 16px 12px; }
   .page-title { font-size: 1.25rem; }
   .vcard { min-height: 155px; }
+  .dash-header {
+    height: auto;
+    min-height: var(--header-h);
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .header-actions .badge { display: none !important; }
+  .tx-amount-col { padding-left: 0; }
+  .sidebar-footer {
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
 }

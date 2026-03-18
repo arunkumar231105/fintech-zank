@@ -1,127 +1,259 @@
-import React from 'react';
+'use client';
+
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { TrendingUp, TrendingDown, AlertTriangle, Users, Activity, ShieldAlert } from 'lucide-react';
-import { adminStats, auditLogs, riskFlags, reconciliationAlerts } from '../../../data/mockData';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { Activity, FileCheck, HelpCircle, ShieldAlert, Wallet } from 'lucide-react';
+import { adminOverviewService } from '../../../../src/services/adminOverviewService';
+import { formatCurrency, formatDateTime } from '../../../../src/utils/dashboard';
+
+function KpiCard({ label, value, tone }) {
+  return (
+    <div className="card stat-card">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value" style={{ color: tone }}>{value}</div>
+    </div>
+  );
+}
 
 export default function AdminOverview() {
+  const [overview, setOverview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    adminOverviewService.getOverview()
+      .then((data) => {
+        if (active) {
+          setOverview(data);
+        }
+      })
+      .catch((requestError) => {
+        if (active) {
+          setError(requestError.message);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (loading) {
+    return <div className="card" style={{ minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Loading overview...</div>;
+  }
+
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title" style={{background: 'var(--grad-purple)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>
-            Platform Overview
-          </h1>
-          <p className="page-subtitle">Real-time operational intelligence for Zank AI.</p>
+          <h1 className="page-title">Admin Overview</h1>
+          <p className="page-subtitle">Live platform KPIs, growth, revenue, health, and action queues.</p>
         </div>
         <div className="flex gap-3">
-          <button className="btn btn-outline btn-sm">Export Report</button>
-          <button className="btn btn-blue btn-sm">Run Reconciliation</button>
+          <Link href="/admin/compliance-kyc" className="btn btn-outline btn-sm">Review KYC</Link>
+          <Link href="/admin/user-support" className="btn btn-blue btn-sm">Manage Tickets</Link>
         </div>
       </div>
 
-      {/* KPI Row */}
-      <div className="grid-dashboard cols-4 mb-5">
-        {[
-          { label: 'Total Users', val: adminStats.totalUsers, change: '+12%', up: true, icon: <Users size={18}/>, color: 'var(--primary)' },
-          { label: 'Total AUM', val: adminStats.totalAUM, change: '+8%', up: true, icon: <Activity size={18}/>, color: 'var(--blue)' },
-          { label: 'Daily Volume', val: adminStats.dailyVolume, change: '-2%', up: false, icon: <TrendingUp size={18}/>, color: 'var(--lavender)' },
-          { label: 'Risk Flags', val: String(adminStats.riskFlags), change: '+3 today', up: false, isRisk: true, icon: <ShieldAlert size={18}/>, color: 'var(--danger)' },
-        ].map((k, i) => (
-          <div key={i} className={`card stat-card ${k.isRisk ? 'card-gradient-danger' : ''}`}>
-            <div className="flex justify-between items-start mb-2">
-              <div className="stat-label">{k.label}</div>
-              <div style={{color: k.color, opacity: 0.8}}>{k.icon}</div>
-            </div>
-            <div className="stat-value" style={{color: k.isRisk ? 'var(--danger)' : 'var(--text-main)'}}>{k.val}</div>
-            <div className={`stat-change ${k.up ? 'text-success' : 'text-danger'}`}>
-              {k.up ? <TrendingUp size={13}/> : <TrendingDown size={13}/>} {k.change}
-            </div>
-          </div>
-        ))}
+      {error && <div className="card mb-4" style={{ color: 'var(--danger)' }}>{error}</div>}
+
+      <div className="grid-dashboard mb-5" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+        <KpiCard label="Total Users" value={overview?.kpis?.total_users || 0} tone="var(--primary)" />
+        <KpiCard label="Active Users" value={overview?.kpis?.active_users || 0} tone="var(--success)" />
+        <KpiCard label="Total AUM" value={formatCurrency(overview?.kpis?.total_aum || 0)} tone="var(--blue)" />
+        <KpiCard label="Total Transactions" value={overview?.kpis?.total_transactions || 0} tone="var(--lavender)" />
       </div>
 
-      {/* Second Row */}
       <div className="grid-dashboard cols-4 mb-5">
-        {[
-          { label: 'Pending KYC', val: adminStats.pendingKYC, color: 'var(--warning)', action: '/admin/compliance' },
-          { label: 'Frozen Accounts', val: adminStats.frozenAccounts, color: 'var(--danger)', action: '/admin/users' },
-          { label: '30d Revenue', val: adminStats.revenue30d, color: 'var(--success)', action: null },
-          { label: 'Open Tickets', val: adminStats.openTickets, color: 'var(--blue)', action: '/admin/support' },
-        ].map((s, i) => (
-          <div key={i} className="card">
-            <div className="stat-label">{s.label}</div>
-            <div style={{fontFamily: 'var(--font-display)', fontSize: '1.75rem', fontWeight: 700, color: s.color, marginBottom: 8}}>{s.val}</div>
-            {s.action && <Link href={s.action} style={{fontSize: '0.8125rem', color: 'var(--text-muted)'}}>View details →</Link>}
-          </div>
-        ))}
+        <div className="card">
+          <div className="stat-label">New Users This Week</div>
+          <div className="stat-value">{overview?.growth?.new_users_this_week || 0}</div>
+        </div>
+        <div className="card">
+          <div className="stat-label">Revenue This Month</div>
+          <div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(overview?.revenue?.revenue_this_month || 0)}</div>
+        </div>
+        <div className="card">
+          <div className="stat-label">Avg Transaction Value</div>
+          <div className="stat-value">{formatCurrency(overview?.revenue?.average_transaction_value || 0)}</div>
+        </div>
+        <div className="card">
+          <div className="stat-label">API Response Time</div>
+          <div className="stat-value">{overview?.platform_health?.api_response_time_ms || 0}ms</div>
+        </div>
       </div>
 
-      <div className="grid-dashboard" style={{gridTemplateColumns: '1.6fr 1fr', gap: 20}}>
-        {/* Activity Chart */}
+      <div className="grid-dashboard mb-5" style={{ gridTemplateColumns: '1.2fr 0.8fr' }}>
         <div className="card">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="heading-md">Platform Volume (7 Days)</h2>
-            <span className="badge badge-blue">$1.24M daily avg</span>
+            <h2 className="heading-md">Quick Stats</h2>
+            <span className="badge badge-success">{overview?.platform_health?.system_uptime || 'n/a'} uptime</span>
           </div>
-          <div style={{height: 160, display: 'flex', alignItems: 'flex-end', gap: 10}}>
-            {[82, 95, 71, 110, 88, 102, 124].map((v, i) => (
-              <div key={i} style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6}}>
-                <div style={{width: '100%', background: 'var(--grad-purple)', borderRadius: '4px 4px 0 0', height: `${(v/130)*140}px`, opacity: 0.75}} />
-                <div style={{fontSize: '0.6875rem', color: 'var(--text-muted)'}}>
-                  {['M','T','W','T','F','S','S'][i]}
-                </div>
-              </div>
-            ))}
+          <div className="grid-dashboard cols-2">
+            <div className="card" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+              <div className="flex items-center gap-2 mb-2"><FileCheck size={16} color="var(--warning)" /> Pending KYC</div>
+              <div style={{ fontWeight: 700, fontSize: '1.4rem' }}>{overview?.quick_stats?.pending_kyc || 0}</div>
+            </div>
+            <div className="card" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+              <div className="flex items-center gap-2 mb-2"><HelpCircle size={16} color="var(--blue)" /> Open Tickets</div>
+              <div style={{ fontWeight: 700, fontSize: '1.4rem' }}>{overview?.quick_stats?.open_support_tickets || 0}</div>
+            </div>
+            <div className="card" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+              <div className="flex items-center gap-2 mb-2"><ShieldAlert size={16} color="var(--danger)" /> Active Risk Flags</div>
+              <div style={{ fontWeight: 700, fontSize: '1.4rem' }}>{overview?.quick_stats?.active_risk_flags || 0}</div>
+            </div>
+            <div className="card" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+              <div className="flex items-center gap-2 mb-2"><Activity size={16} color="var(--success)" /> Reconciliation</div>
+              <div style={{ fontWeight: 700, fontSize: '1rem', textTransform: 'capitalize' }}>{overview?.quick_stats?.reconciliation_status || 'n/a'}</div>
+            </div>
           </div>
         </div>
 
-        {/* Quick Ops */}
         <div className="card">
-          <h2 className="heading-md mb-4">Quick Ops</h2>
-          <div className="flex flex-col gap-3">
-            {[
-              { label: 'Review KYC Queue', count: 45, to: '/admin/compliance', badge: 'badge-warning' },
-              { label: 'High Risk Accounts', count: 14, to: '/admin/risk', badge: 'badge-danger' },
-              { label: 'Open Support Tickets', count: 78, to: '/admin/support', badge: 'badge-blue' },
-              { label: 'Pending Reconciliation', count: 2, to: '/admin/reconciliation', badge: 'badge-warning' },
-            ].map((op, i) => (
-              <Link key={i} href={op.to} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-surface)', border: '1px solid var(--border-glass)', borderRadius: 'var(--r-md)', padding: '12px 14px', transition: 'var(--transition)'}}>
-                <span style={{fontWeight: 500, fontSize: '0.875rem'}}>{op.label}</span>
-                <span className={`badge ${op.badge}`}>{op.count}</span>
-              </Link>
-            ))}
+          <h2 className="heading-md mb-4">Quick Actions</h2>
+          <div className="grid-dashboard cols-2" style={{ gap: 10 }}>
+            <Link href="/admin/platform-wallets" className="btn btn-blue btn-sm">Add Deposit</Link>
+            <Link href="/admin/manage-users" className="btn btn-outline btn-sm">Freeze User</Link>
+            <Link href="/admin/compliance-kyc" className="btn btn-outline btn-sm">Review KYC</Link>
+            <Link href="/admin/user-support" className="btn btn-outline btn-sm">Resolve Ticket</Link>
+            <Link href="/admin/reconciliation" className="btn btn-outline btn-sm">Run Reconciliation</Link>
+            <Link href="/admin/audit-logs" className="btn btn-outline btn-sm">View Audit Logs</Link>
           </div>
         </div>
       </div>
 
-      {/* Recent Audit Activity */}
-      <div className="card mt-5">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="heading-md">Recent System Activity</h2>
-          <Link href="/admin/audit" className="btn btn-ghost btn-sm">View Full Log</Link>
+      <div className="grid-dashboard mb-5" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="heading-md">User Growth</h2>
+            <span className="badge badge-muted">Last 30 days</span>
+          </div>
+          <div style={{ width: '100%', height: 260 }}>
+            <ResponsiveContainer>
+              <LineChart data={overview?.charts?.user_growth || []}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                <XAxis dataKey="date" hide />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Line type="monotone" dataKey="users" stroke="#38bdf8" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr><th>Log ID</th><th>Actor</th><th>Action</th><th>Resource</th><th>Time</th><th>Severity</th></tr>
-            </thead>
-            <tbody>
-              {auditLogs.slice(0, 5).map(log => (
-                <tr key={log.id}>
-                  <td style={{fontFamily: 'monospace', fontSize: '0.8125rem', color: 'var(--text-muted)'}}>{log.id}</td>
-                  <td style={{fontWeight: 600, fontSize: '0.875rem'}}>{log.actor}</td>
-                  <td><span style={{fontFamily: 'monospace', fontSize: '0.8125rem', color: 'var(--blue)'}}>{log.action}</span></td>
-                  <td style={{fontSize: '0.8125rem', color: 'var(--text-muted)'}}>{log.resource}</td>
-                  <td style={{fontSize: '0.8125rem', color: 'var(--text-muted)'}}>{log.ts}</td>
-                  <td>
-                    <span className={`badge ${log.severity === 'high' ? 'badge-danger' : log.severity === 'medium' ? 'badge-warning' : 'badge-muted'}`}>
-                      {log.severity}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="heading-md">Transaction Volume</h2>
+            <span className="badge badge-muted">{overview?.growth?.volume_change_pct || 0}% vs last month</span>
+          </div>
+          <div style={{ width: '100%', height: 260 }}>
+            <ResponsiveContainer>
+              <BarChart data={overview?.charts?.transaction_volume || []}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                <XAxis dataKey="date" hide />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="count" fill="#34d399" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="amount" fill="#818cf8" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-dashboard mb-5" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="heading-md">Revenue Trend</h2>
+            <span className="badge badge-success">{formatCurrency(overview?.revenue?.total_fees_collected || 0)} total</span>
+          </div>
+          <div style={{ width: '100%', height: 260 }}>
+            <ResponsiveContainer>
+              <AreaChart data={overview?.charts?.revenue_trend || []}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                <XAxis dataKey="date" hide />
+                <YAxis />
+                <Tooltip />
+                <Area type="monotone" dataKey="revenue" stroke="#f59e0b" fill="rgba(245,158,11,0.25)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="heading-md">AUM Trend</h2>
+            <span className="badge badge-blue"><Wallet size={12} /> {formatCurrency(overview?.kpis?.total_aum || 0)}</span>
+          </div>
+          <div style={{ width: '100%', height: 260 }}>
+            <ResponsiveContainer>
+              <LineChart data={overview?.charts?.aum_trend || []}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                <XAxis dataKey="date" hide />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="aum" stroke="#22c55e" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-dashboard" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="heading-md">Recent Registrations</h2>
+            <Link href="/admin/manage-users" className="btn btn-ghost btn-sm">View users</Link>
+          </div>
+          {(overview?.recent_registrations || []).slice(0, 8).map((user) => (
+            <div key={user.id} className="tx-row">
+              <div className="tx-meta">
+                <div className="tx-name">{user.name}</div>
+                <div className="tx-date">{user.email}</div>
+              </div>
+              <div className="tx-amount-col">
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{formatDateTime(user.joined_date)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="card">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="heading-md">Recent Activity</h2>
+            <Link href="/admin/audit-logs" className="btn btn-ghost btn-sm">Audit trail</Link>
+          </div>
+          {(overview?.recent_activity || []).slice(0, 10).map((item) => (
+            <div key={item.id} className="tx-row">
+              <div className="tx-meta">
+                <div className="tx-name">{item.title}</div>
+                <div className="tx-date">{item.subtitle}</div>
+              </div>
+              <div className="tx-amount-col">
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{formatDateTime(item.timestamp)}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

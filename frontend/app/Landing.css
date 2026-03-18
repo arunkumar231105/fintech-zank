@@ -203,8 +203,26 @@
 @media (max-width: 640px) {
   .hero { padding: 60px 20px 60px; }
   .lnav-inner { padding: 0 20px; }
+  .lnav { position: static; }
+  .lnav-links { display: none; }
+  .lnav-actions { margin-left: auto; }
+  .lnav-actions .btn-outline { display: none; }
+  .preview-content {
+    height: auto;
+    min-height: 220px;
+  }
+  .preview-url {
+    padding: 3px 16px;
+    margin: 0 8px;
+  }
+  .preview-sidebar {
+    width: 48px;
+    padding: 12px 8px;
+  }
+  .preview-main { padding: 12px; }
+  .pm-row { flex-direction: column; }
   .features-grid, .testimonials-grid { grid-template-columns: 1fr; }
   .lfooter-links { flex-direction: column; gap: 32px; }
-  .lfeatures, .ltestimonials, .lfaq, .ltats { padding-left: 20px; padding-right: 20px; }
+  .lstats, .lfeatures, .ltestimonials, .lfaq, .lcta, .lfooter { padding-left: 20px; padding-right: 20px; }
   .lcta-card { padding: 48px 24px; }
 }

@@ -1,157 +1,232 @@
-import React, { useState } from 'react';
-import { Shield, Key, Bell, Globe, Zap } from 'lucide-react';
+'use client';
 
-const tabs = ['General', 'Security', 'Fees & Limits', 'Notifications', 'Integrations'];
+import React, { useEffect, useMemo, useState } from 'react';
+import { adminSettingsService } from '../../../../src/services/adminSettingsService';
+import { formatDateTime } from '../../../../src/utils/dashboard';
+
+const tabs = ['Fees', 'Limits', 'Features', 'Maintenance', 'Integrations'];
 
 export default function AdminSettings() {
-  const [activeTab, setActiveTab] = useState('General');
-  const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [signupEnabled, setSignupEnabled] = useState(true);
+  const [activeTab, setActiveTab] = useState('Fees');
+  const [settings, setSettings] = useState(null);
+  const [integrations, setIntegrations] = useState([]);
+  const [draft, setDraft] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const loadSettings = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [settingsData, integrationsData] = await Promise.all([
+        adminSettingsService.getSettings(),
+        adminSettingsService.getIntegrations(),
+      ]);
+      setSettings(settingsData);
+      setDraft(JSON.parse(JSON.stringify(settingsData)));
+      setIntegrations(integrationsData);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const unsaved = useMemo(() => JSON.stringify(settings) !== JSON.stringify(draft), [settings, draft]);
+
+  const updateSection = (section, key, value) => {
+    setDraft((current) => ({
+      ...current,
+      [section]: {
+        ...current[section],
+        [key]: value,
+      },
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!draft) {
+      return;
+    }
+    if (Number(draft.transaction_fees.transaction_fee_percentage) < 0 || Number(draft.transaction_fees.transaction_fee_percentage) > 100) {
+      setError('Transaction fee must be between 0 and 100%.');
+      return;
+    }
+    if (draft.maintenance_mode.enabled && !String(draft.maintenance_mode.message || '').trim()) {
+      setError('Maintenance message is required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await adminSettingsService.updateSettings(draft);
+      setSettings(updated);
+      setDraft(JSON.parse(JSON.stringify(updated)));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="card" style={{ minHeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Loading platform settings...</div>;
+  }
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Platform Settings</h1>
-          <p className="page-subtitle">Configure global platform behavior and policies.</p>
+          <p className="page-subtitle">Configure live platform fees, limits, feature flags, maintenance controls, and integrations.</p>
         </div>
-        <button className="btn btn-blue btn-sm">Save All Changes</button>
+        <button className="btn btn-blue btn-sm" onClick={handleSave} disabled={saving || !unsaved}>{saving ? 'Saving...' : 'Save Changes'}</button>
       </div>
 
-      {/* Tabs */}
+      {error && <div className="card mb-4" style={{ color: 'var(--danger)' }}>{error}</div>}
+      {unsaved && <div className="card mb-4" style={{ color: 'var(--warning)' }}>You have unsaved changes.</div>}
+
       <div className="tabs mb-5">
-        {tabs.map(t => <div key={t} className={`tab-item ${activeTab === t ? 'active' : ''}`} onClick={() => setActiveTab(t)}>{t}</div>)}
+        {tabs.map((tab) => (
+          <div key={tab} className={`tab-item ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
+            {tab}
+          </div>
+        ))}
       </div>
 
-      {activeTab === 'General' && (
-        <div className="grid-dashboard" style={{gridTemplateColumns: '1fr 1fr', gap: 20}}>
-          <div className="card">
-            <h2 className="heading-md mb-4">Platform Controls</h2>
+      {activeTab === 'Fees' && (
+        <div className="card" style={{ maxWidth: 760 }}>
+          <div className="grid-dashboard cols-2">
             {[
-              { label: 'Maintenance Mode', sub: 'Block all user activity', state: maintenanceMode, set: setMaintenanceMode, danger: true },
-              { label: 'New User Signups', sub: 'Allow new registrations', state: signupEnabled, set: setSignupEnabled },
-            ].map((ctrl, i) => (
-              <div key={i} className="flex items-center justify-between" style={{padding: '16px 0', borderBottom: i < 1 ? '1px solid var(--border-glass)' : 'none'}}>
-                <div>
-                  <div style={{fontWeight: 600, color: ctrl.danger && ctrl.state ? 'var(--danger)' : 'var(--text-main)'}}>{ctrl.label}</div>
-                  <div style={{fontSize: '0.8125rem', color: 'var(--text-muted)'}}>{ctrl.sub}</div>
-                </div>
-                <label className="toggle">
-                  <input type="checkbox" checked={ctrl.state} onChange={e => ctrl.set(e.target.checked)} />
-                  <div className="toggle-track"><div className="toggle-thumb" /></div>
-                </label>
+              ['transaction_fee_percentage', 'Transaction Fee %'],
+              ['withdrawal_fee', 'Withdrawal Fee'],
+              ['card_issuance_fee', 'Card Issuance Fee'],
+              ['international_transfer_fee', 'International Transfer Fee'],
+              ['minimum_fee', 'Minimum Fee'],
+            ].map(([key, label]) => (
+              <div className="form-group" key={key}>
+                <label className="form-label">{label}</label>
+                <input className="form-input" value={draft.transaction_fees[key]} onChange={(event) => updateSection('transaction_fees', key, Number(event.target.value))} />
               </div>
             ))}
           </div>
-          <div className="card">
-            <h2 className="heading-md mb-4">Platform Info</h2>
-            <div className="form-group mb-4">
-              <label className="form-label">Platform Name</label>
-              <input className="form-input" defaultValue="Zank AI" />
+          <div className="card mt-4" style={{ background: 'rgba(255,255,255,0.03)', padding: 14 }}>
+            Preview: $1,000 transaction = ${(1000 * (Number(draft.transaction_fees.transaction_fee_percentage || 0) / 100)).toFixed(2)} fee
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'Limits' && (
+        <div className="card" style={{ maxWidth: 860 }}>
+          <div className="grid-dashboard cols-2">
+            {[
+              ['verified_daily', 'Verified Daily Withdrawal'],
+              ['verified_monthly', 'Verified Monthly Withdrawal'],
+              ['unverified_daily', 'Unverified Daily Withdrawal'],
+              ['unverified_monthly', 'Unverified Monthly Withdrawal'],
+              ['single_transaction_max', 'Single Transaction Max'],
+              ['card_daily_limit', 'Card Daily Limit'],
+              ['card_monthly_limit', 'Card Monthly Limit'],
+              ['minimum_deposit_amount', 'Minimum Deposit'],
+              ['maximum_deposit_amount', 'Maximum Deposit'],
+            ].map(([key, label]) => (
+              <div className="form-group" key={key}>
+                <label className="form-label">{label}</label>
+                <input className="form-input" value={draft.withdrawal_limits[key]} onChange={(event) => updateSection('withdrawal_limits', key, Number(event.target.value))} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'Features' && (
+        <div className="card" style={{ maxWidth: 760 }}>
+          {[
+            ['virtual_cards_enabled', 'Virtual Cards Enabled'],
+            ['savings_goals_enabled', 'Savings Goals Enabled'],
+            ['rewards_program_active', 'Rewards Program Active'],
+            ['referral_system_active', 'Referral System Active'],
+          ].map(([key, label]) => (
+            <div key={key} className="flex items-center justify-between" style={{ padding: '14px 0', borderBottom: '1px solid var(--border-glass)' }}>
+              <div style={{ fontWeight: 600 }}>{label}</div>
+              <label className="toggle">
+                <input type="checkbox" checked={Boolean(draft.feature_flags[key])} onChange={(event) => updateSection('feature_flags', key, event.target.checked)} />
+                <div className="toggle-track"><div className="toggle-thumb" /></div>
+              </label>
             </div>
-            <div className="form-group mb-4">
-              <label className="form-label">Support Email</label>
-              <input className="form-input" defaultValue="support@zankmail.com" />
+          ))}
+          <div className="grid-dashboard cols-2 mt-4">
+            <div className="form-group">
+              <label className="form-label">Cashback Percentage</label>
+              <input className="form-input" value={draft.feature_flags.cashback_percentage} onChange={(event) => updateSection('feature_flags', 'cashback_percentage', Number(event.target.value))} />
             </div>
             <div className="form-group">
-              <label className="form-label">Compliance Officer Email</label>
-              <input className="form-input" defaultValue="compliance@zankops.com" />
+              <label className="form-label">Points Conversion Rate</label>
+              <input className="form-input" value={draft.feature_flags.points_conversion_rate} onChange={(event) => updateSection('feature_flags', 'points_conversion_rate', Number(event.target.value))} />
             </div>
           </div>
         </div>
       )}
 
-      {activeTab === 'Security' && (
-        <div className="card" style={{maxWidth: 600}}>
-          <h2 className="heading-md mb-4">Security Policies</h2>
-          {[
-            { label: 'Force 2FA for All Users', sub: 'Require two-factor on login', checked: true },
-            { label: 'Session Timeout (15 min)', sub: 'Auto-logout inactive sessions', checked: true },
-            { label: 'IP Allowlist for Admins', sub: 'Block admin access from unknown IPs', checked: false },
-            { label: 'Fraud Auto-Block', sub: 'Automatically freeze flagged accounts', checked: true },
-          ].map((s, i) => (
-            <div key={i} className="flex justify-between items-center" style={{padding: '16px 0', borderBottom: i < 3 ? '1px solid var(--border-glass)' : 'none'}}>
-              <div>
-                <div style={{fontWeight: 600}}>{s.label}</div>
-                <div style={{fontSize: '0.8125rem', color: 'var(--text-muted)'}}>{s.sub}</div>
-              </div>
-              <label className="toggle">
-                <input type="checkbox" defaultChecked={s.checked} />
-                <div className="toggle-track"><div className="toggle-thumb" /></div>
-              </label>
+      {activeTab === 'Maintenance' && (
+        <div className="card" style={{ maxWidth: 760 }}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div style={{ fontWeight: 700 }}>Maintenance Mode</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Enabling this will lock the platform for end users.</div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {activeTab === 'Fees & Limits' && (
-        <div className="card" style={{maxWidth: 640}}>
-          <h2 className="heading-md mb-4">Transaction Limits & Fees</h2>
-          <div className="grid-dashboard cols-2" style={{gap: 16}}>
-            {[
-              ['Max Daily Transfer', '$10,000'],
-              ['Wire Transfer Fee', '0.1%'],
-              ['FX Spread (Basic)', '0.5%'],
-              ['FX Spread (Premium)', '0%'],
-              ['Max Withdrawal (Daily)', '$5,000'],
-              ['Max Card Limit', '$2,000'],
-            ].map(([label, val]) => (
-              <div className="form-group" key={label}>
-                <label className="form-label">{label}</label>
-                <input className="form-input" defaultValue={val} />
-              </div>
-            ))}
+            <label className="toggle">
+              <input type="checkbox" checked={Boolean(draft.maintenance_mode.enabled)} onChange={(event) => updateSection('maintenance_mode', 'enabled', event.target.checked)} />
+              <div className="toggle-track"><div className="toggle-thumb" /></div>
+            </label>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'Notifications' && (
-        <div className="card" style={{maxWidth: 600}}>
-          <h2 className="heading-md mb-4">System Notifications</h2>
-          {[
-            { label: 'Critical Risk Alerts', sub: 'Email team on critical flags', checked: true },
-            { label: 'Daily AUM Report', sub: 'Automated morning digest', checked: true },
-            { label: 'Reconciliation Mismatch', sub: 'Notify on balance discrepancy', checked: true },
-            { label: 'User Signup Spike', sub: 'Alert if signups exceed baseline', checked: false },
-          ].map((n, i) => (
-            <div key={i} className="flex justify-between items-center" style={{padding: '14px 0', borderBottom: i < 3 ? '1px solid var(--border-glass)' : 'none'}}>
-              <div>
-                <div style={{fontWeight: 600}}>{n.label}</div>
-                <div style={{fontSize: '0.8125rem', color: 'var(--text-muted)'}}>{n.sub}</div>
-              </div>
-              <label className="toggle">
-                <input type="checkbox" defaultChecked={n.checked} />
-                <div className="toggle-track"><div className="toggle-thumb" /></div>
-              </label>
+          <div className="form-group mb-4">
+            <label className="form-label">Maintenance Message</label>
+            <textarea className="form-input" rows={4} value={draft.maintenance_mode.message || ''} onChange={(event) => updateSection('maintenance_mode', 'message', event.target.value)} />
+          </div>
+          <div className="grid-dashboard cols-2">
+            <div className="form-group">
+              <label className="form-label">Scheduled For</label>
+              <input className="form-input" type="datetime-local" value={draft.maintenance_mode.scheduled_for || ''} onChange={(event) => updateSection('maintenance_mode', 'scheduled_for', event.target.value)} />
             </div>
-          ))}
+            <div className="form-group">
+              <label className="form-label">Whitelisted IPs</label>
+              <input className="form-input" value={(draft.maintenance_mode.whitelist_ips || []).join(', ')} onChange={(event) => updateSection('maintenance_mode', 'whitelist_ips', event.target.value.split(',').map((item) => item.trim()).filter(Boolean))} />
+            </div>
+          </div>
+          <div className="card mt-4" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--danger)', padding: 14 }}>
+            Enabling maintenance mode is a critical action and should only be saved after double-checking active operations.
+          </div>
         </div>
       )}
 
       {activeTab === 'Integrations' && (
-        <div className="card" style={{maxWidth: 640}}>
-          <h2 className="heading-md mb-4">Connected Services</h2>
-          {[
-            ['Stripe', 'Payment processor', 'var(--primary)', 'Connected'],
-            ['Plaid', 'Bank linking', 'var(--blue)', 'Connected'],
-            ['Jumio', 'KYC provider', 'var(--lavender)', 'Connected'],
-            ['SendGrid', 'Transactional email', 'var(--success)', 'Connected'],
-            ['PagerDuty', 'Incident management', 'var(--warning)', 'Disconnected'],
-          ].map(([name, desc, color, status]) => (
-            <div key={name} className="flex items-center gap-3" style={{padding: '14px 0', borderBottom: '1px solid var(--border-glass)'}}>
-              <div style={{width: 36, height: 36, borderRadius: 'var(--r-md)', background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontWeight: 700, fontSize: '0.625rem'}}>
-                {name[0]}
+        <div className="card">
+          <div className="heading-md mb-4">Connected Services</div>
+          {integrations.map((integration) => (
+            <div key={integration.id} className="flex items-center gap-3" style={{ padding: '16px 0', borderBottom: '1px solid var(--border-glass)' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
+                {integration.service_name[0]}
               </div>
-              <div style={{flex: 1}}>
-                <div style={{fontWeight: 600}}>{name}</div>
-                <div style={{fontSize: '0.8125rem', color: 'var(--text-muted)'}}>{desc}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700 }}>{integration.service_name}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{integration.category}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Last sync: {formatDateTime(integration.last_sync_at)} · Key: {integration.api_key_masked}</div>
+                {integration.error && <div style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: 4 }}>{integration.error}</div>}
               </div>
-              <span className={`badge ${status === 'Connected' ? 'badge-success' : 'badge-muted'}`}>{status}</span>
-              <button className="btn btn-outline btn-sm">{status === 'Connected' ? 'Configure' : 'Connect'}</button>
+              <span className={`badge ${integration.status === 'connected' ? 'badge-success' : integration.status === 'error' ? 'badge-warning' : 'badge-danger'}`}>{integration.status}</span>
             </div>
           ))}
         </div>
       )}
+
+      <div className="card mt-5" style={{ background: 'rgba(255,255,255,0.03)', padding: 16 }}>
+        Last modified by <strong>{draft.last_modified_by}</strong> on {formatDateTime(draft.last_modified_at)}.
+      </div>
     </div>
   );
 }
