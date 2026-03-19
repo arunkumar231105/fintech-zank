@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import httpx
+from urllib.parse import urlsplit
 
 from ..core.database import get_db
 from ..core.security import get_password_hash, verify_password, create_access_token, create_refresh_token
@@ -17,6 +18,18 @@ from ..schemas import (
 import uuid
 
 router = APIRouter()
+
+
+def get_frontend_base_url() -> str:
+    explicit = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+    if explicit:
+        return explicit
+
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/google/callback").strip()
+    parsed = urlsplit(redirect_uri)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return "http://localhost:3000"
 
 # Helper for UUID
 def gen_token():
@@ -55,7 +68,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
 
     # Send email
-    verify_url = f"http://localhost:3000/auth/verify-email?token={token}"
+    verify_url = f"{get_frontend_base_url()}/auth/verify-email?token={token}"
     html = f"<h3>Welcome to Zank AI!</h3><p>Please <a href='{verify_url}'>click here</a> to verify your email address. This link expires in 24 hours.</p>"
     send_email(user.email, "Verify your Zank AI Account", html)
 
@@ -227,7 +240,7 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     db.add(pr_record)
     db.commit()
     
-    reset_url = f"http://localhost:3000/auth/reset-password?token={token}"
+    reset_url = f"{get_frontend_base_url()}/auth/reset-password?token={token}"
     html = f"""
     <div style="font-family: Arial, sans-serif; background-color: #0b1120; color: #e2e8f0; padding: 40px 20px;">
         <div style="max-width: 600px; margin: 0 auto; background-color: #1e293b; border-radius: 12px; padding: 32px; border: 1px solid #334155;">

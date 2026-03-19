@@ -8,6 +8,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "noreply@zank.ai")
+SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", 15))
 
 def send_email(to_email: str, subject: str, html_body: str):
     try:
@@ -17,7 +18,8 @@ def send_email(to_email: str, subject: str, html_body: str):
         msg['Subject'] = subject
         msg.attach(MIMEText(html_body, 'html'))
 
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
+        # Prevent auth flows from hanging indefinitely if SMTP is slow/unreachable.
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT)
         server.starttls()
         # Only login if credentials map
         if SMTP_USER and SMTP_PASSWORD:
