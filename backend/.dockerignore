@@ -5,3 +5,5 @@ __pycache__
 .git
 *.md
 .pytest_cache
+venv
+.venv

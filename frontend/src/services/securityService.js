@@ -3,22 +3,16 @@ import { apiClient, normalizeApiError } from './apiClient';
 export const securityService = {
   async getKyc() {
     try {
-      const { data } = await apiClient.get('/security/kyc');
+      const { data } = await apiClient.get('/risk/kyc/me');
       return data;
     } catch (error) {
       throw normalizeApiError(error);
     }
   },
 
-  async uploadKyc({ documentType, documentFile }, onUploadProgress) {
+  async uploadKyc(payload, onUploadProgress) {
     try {
-      const formData = new FormData();
-      formData.append('document_type', documentType);
-      formData.append('document_file', documentFile);
-      const { data } = await apiClient.post('/security/kyc/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress,
-      });
+      const { data } = await apiClient.post('/risk/kyc', payload);
       return data;
     } catch (error) {
       throw normalizeApiError(error);

@@ -161,6 +161,7 @@ export default function UserTransactions() {
           startDate: filters.startDate || undefined,
           endDate: filters.endDate || undefined,
           search: filters.search || undefined,
+          account_id: wallet?.accountId || undefined,
         });
         setTransactions(result.items);
         setPagination(result.pagination);
@@ -367,6 +368,7 @@ export default function UserTransactions() {
               <tr>
                 <th>Transaction</th>
                 <th>Amount</th>
+                <th>Fee</th>
                 <th>Date</th>
                 <th>Status</th>
               </tr>
@@ -374,7 +376,7 @@ export default function UserTransactions() {
             <tbody>
               {loading.list && (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', padding: 42, color: 'var(--text-muted)' }}>Loading transactions...</td>
+                  <td colSpan={5} style={{ textAlign: 'center', padding: 42, color: 'var(--text-muted)' }}>Loading transactions...</td>
                 </tr>
               )}
               {!loading.list && transactions.map((transaction) => (
@@ -393,13 +395,14 @@ export default function UserTransactions() {
                   <td style={{ fontWeight: 700, color: directionColor(transaction.direction) }}>
                     {transaction.direction === 'credit' ? '+' : '-'}{formatCurrency(transaction.amount, transaction.currency)}
                   </td>
+                  <td>{transaction.fee ? formatCurrency(transaction.fee, transaction.currency) : '-'}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>{formatDateTime(transaction.timestamp)}</td>
                   <td><span className={`badge ${statusBadge(transaction.status)}`}>{transaction.status}</span></td>
                 </tr>
               ))}
               {!loading.list && transactions.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
+                  <td colSpan={5} style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
                     No transactions yet.
                   </td>
                 </tr>
@@ -450,6 +453,7 @@ export default function UserTransactions() {
                     ['Amount', `${detail.direction === 'credit' ? '+' : '-'}${formatCurrency(detail.amount, detail.currency)}`],
                     ['Description', detail.description],
                     ['Reference', detail.reference],
+                    ['Fee', detail.fee ? formatCurrency(detail.fee, detail.currency) : '-'],
                     ['From', detail.fromUser || '-'],
                     ['To', detail.toUser || '-'],
                     ['Timestamp', formatDateTime(detail.timestamp)],
@@ -471,6 +475,35 @@ export default function UserTransactions() {
                   {detail.status === 'pending' && (
                     <div className="card" style={{ background: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.18)' }}>
                       Processing...
+                    </div>
+                  )}
+                  {detail.entries?.length > 0 && (
+                    <div className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                      <div className="heading-sm mb-3">Ledger Entries</div>
+                      {detail.entries.map((entry) => (
+                        <div key={entry.id} className="tx-row">
+                          <div className="tx-meta">
+                            <div className="tx-name">{entry.account_id}</div>
+                            <div className="tx-date">{entry.entry_type} · Balance After {formatCurrency(entry.balance_after, entry.currency)}</div>
+                          </div>
+                          <div className="tx-amount-col" style={{ color: entry.entry_type === 'credit' ? 'var(--success)' : 'var(--danger)' }}>
+                            {formatCurrency(entry.amount, entry.currency)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {detail.events?.length > 0 && (
+                    <div className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                      <div className="heading-sm mb-3">State Events</div>
+                      {detail.events.map((event) => (
+                        <div key={event.id} className="tx-row">
+                          <div className="tx-meta">
+                            <div className="tx-name">{event.from_status || 'start'} → {event.to_status}</div>
+                            <div className="tx-date">{event.created_at ? formatDateTime(event.created_at) : '-'}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

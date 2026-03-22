@@ -1,24 +1,34 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# Install dependencies needed for psycopg2
 RUN apt-get update && \
     apt-get install -y gcc libpq-dev && \
+    python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
 COPY requirements.txt .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies
-RUN pip install --no-cache-dir --upgrade -r requirements.txt
+FROM python:3.11-slim AS runner
 
-# Copy all the FastAPI code
+WORKDIR /app
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN apt-get update && \
+    apt-get install -y libpq5 && \
+    addgroup --system appgroup && \
+    adduser --system --ingroup appgroup appuser && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
 COPY ./app ./app
 
-# Add a healthy check port (FastAPI default)
+USER appuser
+
 EXPOSE 8000
 
-# The command to run FastAPI using Uvicorn
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

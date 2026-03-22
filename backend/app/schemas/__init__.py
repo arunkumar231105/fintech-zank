@@ -1,12 +1,25 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime
 
 class UserBase(BaseModel):
-    email: str
+    email: EmailStr
     first_name: str
     last_name: str
     role: str = "user"
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr):
+        return str(value).strip().lower()
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def strip_names(cls, value: str):
+        value = value.strip()
+        if not value:
+            raise ValueError("Field cannot be empty")
+        return value
 
 class UserCreate(UserBase):
     password: str
@@ -33,8 +46,13 @@ class UserResponse(UserBase):
         from_attributes = True
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_login_email(cls, value: EmailStr):
+        return str(value).strip().lower()
 
     @field_validator("password")
     @classmethod
@@ -44,11 +62,29 @@ class LoginRequest(BaseModel):
         return value
 
 class OTPVerifyRequest(BaseModel):
-    email: str
+    email: EmailStr
     otp: str
 
+    @field_validator("email")
+    @classmethod
+    def normalize_otp_email(cls, value: EmailStr):
+        return str(value).strip().lower()
+
+    @field_validator("otp")
+    @classmethod
+    def validate_otp(cls, value: str):
+        value = value.strip()
+        if not value:
+            raise ValueError("OTP is required")
+        return value
+
 class ForgotPasswordRequest(BaseModel):
-    email: str
+    email: EmailStr
+
+    @field_validator("email")
+    @classmethod
+    def normalize_forgot_email(cls, value: EmailStr):
+        return str(value).strip().lower()
 
 class ResetPasswordRequest(BaseModel):
     token: str
@@ -60,6 +96,14 @@ class ResetPasswordRequest(BaseModel):
     def validate_reset_password_length(cls, value: str):
         if len(value.encode("utf-8")) > 72:
             raise ValueError("Password must be 72 bytes or fewer")
+        return value
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, value: str):
+        value = value.strip()
+        if not value:
+            raise ValueError("Token is required")
         return value
 
 class GoogleLoginRequest(BaseModel):

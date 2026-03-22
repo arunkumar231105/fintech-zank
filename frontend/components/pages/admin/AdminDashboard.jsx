@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import {
@@ -53,8 +53,10 @@ const pageComponentMap = {
 export default function AdminDashboard() {
   const pathname = usePathname();
   const router = useRouter();
+  const notifsRef = useRef(null);
   const [collapsed, setCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showNotifs, setShowNotifs] = useState(false);
   const [adminUser, setAdminUser] = useState(null);
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +65,15 @@ export default function AdminDashboard() {
   const sectionPath = currentPath.split('/')[0] || '';
   const currentPage = navItems.find((item) => item.path === sectionPath) || navItems[0];
   const PageComponent = pageComponentMap[sectionPath] || pageComponentMap[''];
+  const adminNotifications = useMemo(() => {
+    return (overview?.recent_actions || []).slice(0, 8).map((item) => ({
+      id: item.id,
+      title: item.action_type?.replace(/_/g, ' ') || 'Admin activity',
+      message: item.target_user || item.entity_type || 'Platform event',
+      timestamp: item.timestamp,
+      read: false,
+    }));
+  }, [overview]);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +104,16 @@ export default function AdminDashboard() {
       active = false;
     };
   }, [router]);
+
+  useEffect(() => {
+    const handler = (event) => {
+      if (notifsRef.current && !notifsRef.current.contains(event.target)) {
+        setShowNotifs(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   if (loading) {
     return (
@@ -180,10 +201,48 @@ export default function AdminDashboard() {
             <div className="badge badge-warning" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', padding: '5px 10px' }}>
               <AlertTriangle size={12} /> {overview?.kpis?.pending_kyc || 0} Pending KYC
             </div>
-            <button className="header-icon-btn" onClick={() => router.push('/admin/audit-logs')}>
-              <Bell size={17} />
-              {Boolean(overview?.recent_actions?.length) && <span className="notif-dot" />}
-            </button>
+            <div ref={notifsRef} style={{ position: 'relative' }}>
+              <button className="header-icon-btn" onClick={() => setShowNotifs((value) => !value)}>
+                <Bell size={17} />
+                {Boolean(adminNotifications.length) && <span className="notif-dot" />}
+              </button>
+              {showNotifs && (
+                <div className="notif-panel">
+                  <div className="notif-header">
+                    <span className="heading-sm">Admin Activity</span>
+                    <div className="flex gap-2 items-center">
+                      <span className="badge badge-primary">{adminNotifications.length} items</span>
+                    </div>
+                  </div>
+                  {adminNotifications.length === 0 && (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '12px 0' }}>
+                      No recent admin notifications.
+                    </div>
+                  )}
+                  {adminNotifications.map((notification) => (
+                    <button
+                      key={notification.id}
+                      className="notif-item unread"
+                      onClick={() => {
+                        setShowNotifs(false);
+                        router.push('/admin/audit-logs');
+                      }}
+                      style={{ width: '100%', background: 'transparent', border: 'none', textAlign: 'left' }}
+                    >
+                      <div className="notif-dot-unread" />
+                      <div>
+                        <div className="heading-sm">{notification.title}</div>
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 2 }}>{notification.message}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>{new Date(notification.timestamp).toLocaleString()}</div>
+                      </div>
+                    </button>
+                  ))}
+                  <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border-glass)' }}>
+                    <Link href="/admin/audit-logs" className="btn btn-outline btn-sm btn-full" onClick={() => setShowNotifs(false)}>View Audit Logs</Link>
+                  </div>
+                </div>
+              )}
+            </div>
             <button className="header-icon-btn" onClick={() => { clearSessionToken(); router.push('/auth/login'); }} title="Sign Out">
               <LogOut size={17} />
             </button>

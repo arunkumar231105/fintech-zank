@@ -19,6 +19,11 @@ function normalizeTransaction(item = {}) {
     timestamp: item.timestamp || '',
     category: item.category || 'General',
     note: item.note || '',
+    fee: Number(item.fee || 0),
+    entries: Array.isArray(item.entries) ? item.entries : [],
+    events: Array.isArray(item.events) ? item.events : [],
+    createdAt: item.created_at || item.timestamp || '',
+    postedAt: item.posted_at || '',
   };
 }
 

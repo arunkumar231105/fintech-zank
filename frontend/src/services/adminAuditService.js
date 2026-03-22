@@ -1,10 +1,10 @@
-import { apiClient, normalizeApiError } from './apiClient';
+import { ledgerService } from './ledgerService';
+import { normalizeApiError } from './apiClient';
 
 export const adminAuditService = {
   async getLogs(params) {
     try {
-      const { data } = await apiClient.get('/admin/audit-logs', { params });
-      return data;
+      return await ledgerService.getAuditLogs(params);
     } catch (error) {
       throw normalizeApiError(error);
     }
@@ -12,11 +12,7 @@ export const adminAuditService = {
 
   async exportLogs(params) {
     try {
-      const response = await apiClient.get('/admin/audit-logs/export', {
-        params,
-        responseType: 'blob',
-      });
-      return response.data;
+      return await ledgerService.exportAuditLogs(params);
     } catch (error) {
       throw normalizeApiError(error);
     }

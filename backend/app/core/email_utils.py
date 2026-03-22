@@ -1,14 +1,18 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "noreply@zank.ai")
-SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", 15))
+from .config import get_settings
+from .logging import get_logger
+
+settings = get_settings()
+logger = get_logger(__name__)
+SMTP_HOST = settings.smtp_host
+SMTP_PORT = settings.smtp_port
+SMTP_USER = settings.smtp_user
+SMTP_PASSWORD = settings.smtp_password
+SMTP_FROM = settings.smtp_from
+SMTP_TIMEOUT = settings.smtp_timeout
 
 def send_email(to_email: str, subject: str, html_body: str):
     try:
@@ -26,6 +30,6 @@ def send_email(to_email: str, subject: str, html_body: str):
             server.login(SMTP_USER, SMTP_PASSWORD)
         server.send_message(msg)
         server.quit()
-    except Exception as e:
-        print(f"Failed to send email to {to_email}: {e}")
+    except Exception:
+        logger.error("Failed to send email", extra={"to_email": to_email}, exc_info=True)
         # In actual prod we might raise, but we don't want to crash the request randomly if SMTP is fake

@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.dependencies import get_current_user
 from ..core.email_utils import send_email
 from ..models import User as UserModel, Wallet as WalletModel, Transaction as TransactionModel, OTPCode
+from ..services.ledger_service import ensure_system_account, ensure_user_wallet_account, get_realtime_balance, post_ledger_transaction, sync_wallet_from_ledger
 from pydantic import BaseModel
 import uuid
 import random
@@ -70,6 +72,10 @@ def get_wallet(current_user: UserModel = Depends(get_current_user), db: Session 
         db.commit()
         db.refresh(wallet)
 
+    ledger_account = ensure_user_wallet_account(db, current_user.id, currency=wallet.currency or "USD", opening_balance=wallet.total_balance or 0.0)
+    db.commit()
+    realtime_balance = get_realtime_balance(db, ledger_account.id)
+
     transactions = (
         db.query(TransactionModel)
         .filter(TransactionModel.user_id == current_user.id)
@@ -93,11 +99,13 @@ def get_wallet(current_user: UserModel = Depends(get_current_user), db: Session 
         "routingNumber": wallet.routing_number,
         "bankName": "Zank Bank (Member FDIC)",
         "iban": f"US29ZANK{wallet.account_number.replace('-','')}",
+        "accountId": ledger_account.id,
         "status": "active",
         "dailyLimit": 5000.0,
         "monthlyLimit": 25000.0,
         "todaySpend": today_spend,
         "monthSpend": month_spend,
+        "realtimeBalance": float(realtime_balance),
         "recentTransactions": [_serialize_transaction(txn) for txn in transactions],
     }
 
@@ -110,21 +118,21 @@ def send_money(req: SendMoneyRequest, current_user: UserModel = Depends(get_curr
         raise HTTPException(status_code=404, detail="Wallet not found")
     if wallet.available_balance < req.amount:
         raise HTTPException(status_code=400, detail="Insufficient funds")
-    
-    wallet.total_balance -= req.amount
-    wallet.available_balance -= req.amount
-    
-    txn = TransactionModel(
-        user_id=current_user.id,
-        txn_id=f"TXN-SEND-{uuid.uuid4().hex[:6].upper()}",
-        merchant=req.recipientEmail,
-        type="debit",
-        amount=req.amount,
-        category="Transfer",
-        note=req.note,
-        status="completed",
+
+    user_account = ensure_user_wallet_account(db, current_user.id, currency=wallet.currency or "USD", opening_balance=wallet.total_balance or 0.0)
+    settlement_account = ensure_system_account(db, "settlement_pool", wallet.currency or "USD")
+    txn = post_ledger_transaction(
+        db=db,
+        entries=[
+            {"account_id": user_account.id, "entry_type": "debit", "amount": Decimal(str(req.amount))},
+            {"account_id": settlement_account.id, "entry_type": "credit", "amount": Decimal(str(req.amount))},
+        ],
+        transaction_type="transfer",
+        reference_id=f"TXN-SEND-{uuid.uuid4().hex[:6].upper()}",
+        currency=wallet.currency or "USD",
+        metadata={"merchant": req.recipientEmail, "description": req.note or "Transfer", "user_id": current_user.id},
     )
-    db.add(txn)
+    sync_wallet_from_ledger(db, current_user.id, currency=wallet.currency or "USD")
     db.commit()
 
     return {
@@ -201,19 +209,20 @@ def withdraw_funds(req: WithdrawRequest, current_user: UserModel = Depends(get_c
 
     otp_record.used = True
 
-    wallet.total_balance -= req.amount
-    wallet.available_balance -= req.amount
-    txn = TransactionModel(
-        user_id=current_user.id,
-        txn_id=f"TXN-WDR-{uuid.uuid4().hex[:6].upper()}",
-        merchant=req.destinationAccountId,
-        type="debit",
-        amount=req.amount,
-        category="Withdrawal",
-        note="Withdrawal to linked account",
-        status="completed",
+    user_account = ensure_user_wallet_account(db, current_user.id, currency=wallet.currency or "USD", opening_balance=wallet.total_balance or 0.0)
+    clearing_account = ensure_system_account(db, "ach_clearing", wallet.currency or "USD")
+    txn = post_ledger_transaction(
+        db=db,
+        entries=[
+            {"account_id": user_account.id, "entry_type": "debit", "amount": Decimal(str(req.amount))},
+            {"account_id": clearing_account.id, "entry_type": "credit", "amount": Decimal(str(req.amount))},
+        ],
+        transaction_type="withdrawal",
+        reference_id=f"TXN-WDR-{uuid.uuid4().hex[:6].upper()}",
+        currency=wallet.currency or "USD",
+        metadata={"merchant": req.destinationAccountId, "description": "Withdrawal to linked account", "user_id": current_user.id},
     )
-    db.add(txn)
+    sync_wallet_from_ledger(db, current_user.id, currency=wallet.currency or "USD")
     db.commit()
 
     return {

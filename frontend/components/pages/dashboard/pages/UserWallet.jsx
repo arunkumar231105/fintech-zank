@@ -52,8 +52,10 @@ function ActionButton({ onClick, icon: Icon, label, variant = 'outline' }) {
 
 export default function UserWallet() {
   const {
+    user,
     wallet,
     linkedAccounts,
+    depositFunds,
     sendWithdrawOtp,
     withdrawFunds,
     sendFunds,
@@ -63,11 +65,13 @@ export default function UserWallet() {
   const [showAccNum, setShowAccNum] = useState(false);
   const [activeModal, setActiveModal] = useState('');
   const [withdrawForm, setWithdrawForm] = useState({ amount: '', destinationAccountId: '', otp: '' });
+  const [depositForm, setDepositForm] = useState({ amount: '', reference_id: '' });
   const [sendForm, setSendForm] = useState({ recipientEmail: '', amount: '', note: '' });
   const [requestForm, setRequestForm] = useState({ contact: '', amount: '', message: '' });
   const [otpSent, setOtpSent] = useState(false);
   const [submitting, setSubmitting] = useState({
     sendOtp: false,
+    deposit: false,
     withdraw: false,
     send: false,
     request: false,
@@ -140,14 +144,41 @@ export default function UserWallet() {
     }
   };
 
+  const handleDeposit = async () => {
+    if (!isValidAmount(depositForm.amount)) {
+      pushToast({ tone: 'error', message: 'Enter a valid deposit amount.' });
+      return;
+    }
+    if (!depositForm.reference_id.trim()) {
+      pushToast({ tone: 'error', message: 'Reference ID is required.' });
+      return;
+    }
+
+    setSubmitting((current) => ({ ...current, deposit: true }));
+    try {
+      const result = await depositFunds({
+        amount: Number(depositForm.amount),
+        currency: wallet.currency,
+        reference_id: depositForm.reference_id.trim(),
+      });
+      pushToast({ tone: 'success', message: result.reference_id ? `Deposit posted (${result.reference_id}).` : 'Deposit completed successfully.' });
+      setDepositForm({ amount: '', reference_id: '' });
+      setActiveModal('');
+    } catch (error) {
+      pushToast({ tone: 'error', message: error.message || 'Deposit failed.' });
+    } finally {
+      setSubmitting((current) => ({ ...current, deposit: false }));
+    }
+  };
+
   const handleSend = async () => {
     const recipient = sendForm.recipientEmail.trim();
     if (!isValidAmount(sendForm.amount)) {
       pushToast({ tone: 'error', message: 'Enter a valid amount.' });
       return;
     }
-    if (!(isValidEmail(recipient) || isValidPhone(recipient))) {
-      pushToast({ tone: 'error', message: 'Enter a valid recipient email or phone.' });
+    if (!(isValidEmail(recipient) || isValidPhone(recipient) || recipient.length >= 8)) {
+      pushToast({ tone: 'error', message: 'Enter a valid recipient email or user ID.' });
       return;
     }
     if (Number(sendForm.amount) > Number(wallet.availableBalance)) {
@@ -208,19 +239,23 @@ export default function UserWallet() {
           <p className="page-subtitle">Manage balances, secure withdrawals, transfers, and money requests.</p>
         </div>
         <div className="flex gap-3">
+          {user?.role === 'admin' && <ActionButton onClick={() => setActiveModal('deposit')} icon={Plus} label="Add Money" />}
           <ActionButton onClick={() => setActiveModal('withdraw')} icon={ArrowUpRight} label="Withdraw" variant="primary" />
           <ActionButton onClick={() => setActiveModal('send')} icon={Send} label="Send" />
-          <ActionButton onClick={() => setActiveModal('request')} icon={Plus} label="Request" />
+          <ActionButton onClick={() => setActiveModal('request')} icon={Wallet2} label="Request" />
         </div>
       </div>
 
       <div className="grid-dashboard cols-3 mb-5">
         <div className="card card-gradient-primary" style={{ position: 'relative', overflow: 'hidden', padding: 24 }}>
-          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: 8 }}>Wallet Balance</div>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: 8 }}>Available Balance</div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: '2.25rem', fontWeight: 800 }} className="grad-text-primary">
-            {formatCurrency(wallet.totalBalance, wallet.currency)}
+            {formatCurrency(wallet.availableBalance, wallet.currency)}
           </div>
           <div style={{ marginTop: 6, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{wallet.currency} · Wallet ID {wallet.walletId}</div>
+          <div style={{ marginTop: 8, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+            Cached {formatCurrency(wallet.cachedBalance ?? wallet.totalBalance, wallet.currency)} · Realtime {formatCurrency(wallet.realtimeBalance ?? wallet.totalBalance, wallet.currency)}
+          </div>
         </div>
 
         <div className="card" style={{ padding: 24 }}>
@@ -241,10 +276,27 @@ export default function UserWallet() {
           </div>
           <div className="card" style={{ padding: 16 }}>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Wallet Status</div>
-            <span className={`badge ${wallet.status === 'active' ? 'badge-success' : 'badge-warning'}`}>{wallet.status}</span>
+            <span className={`badge ${wallet.status === 'active' ? 'badge-success' : 'badge-danger'}`}>{wallet.status}</span>
           </div>
         </div>
       </div>
+
+      <ActionModal open={activeModal === 'deposit'} title="Add Money" onClose={() => setActiveModal('')}>
+        <div className="form-group mb-4">
+          <label className="form-label">Amount</label>
+          <input className="form-input" value={depositForm.amount} onChange={(event) => setDepositForm((current) => ({ ...current, amount: event.target.value }))} placeholder="0.00" />
+        </div>
+        <div className="form-group mb-5">
+          <label className="form-label">Reference ID</label>
+          <input className="form-input" value={depositForm.reference_id} onChange={(event) => setDepositForm((current) => ({ ...current, reference_id: event.target.value }))} placeholder="BANK-REF-001" />
+        </div>
+        <div className="flex gap-3">
+          <button className="btn btn-outline flex-1" onClick={() => setActiveModal('')}>Cancel</button>
+          <button className="btn btn-primary flex-1" onClick={handleDeposit} disabled={submitting.deposit}>
+            {submitting.deposit ? 'Processing...' : 'Confirm Deposit'}
+          </button>
+        </div>
+      </ActionModal>
 
       <div className="grid-dashboard" style={{ gridTemplateColumns: '1.4fr 1fr', gap: 20 }}>
         <div className="card">
@@ -406,7 +458,7 @@ export default function UserWallet() {
 
       <ActionModal open={activeModal === 'send'} title="Send Money" onClose={() => setActiveModal('')}>
         <div className="form-group mb-4">
-          <label className="form-label">Recipient Email or Phone</label>
+          <label className="form-label">Recipient Email or User ID</label>
           <input className="form-input" value={sendForm.recipientEmail} onChange={(event) => setSendForm((current) => ({ ...current, recipientEmail: event.target.value }))} placeholder="name@example.com" />
         </div>
         <div className="form-group mb-4">

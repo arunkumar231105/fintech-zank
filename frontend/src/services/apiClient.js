@@ -1,8 +1,10 @@
 import axios from 'axios';
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1').replace(/\/$/, '');
+const API_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS || 30000);
 
 let refreshPromise = null;
+let requestSequence = 0;
 
 function getStoredToken() {
   if (typeof window === 'undefined') {
@@ -59,6 +61,10 @@ export function normalizeApiError(error) {
     return { status: 0, message: 'Server unavailable, try again later.' };
   }
 
+  if (error?.code === 'ECONNABORTED') {
+    return { status: 0, message: 'Request timed out. Please try again.' };
+  }
+
   return { status: error?.response?.status || 0, message: 'Connection failed, try again.' };
 }
 
@@ -80,6 +86,7 @@ async function refreshAccessToken() {
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
+  timeout: API_TIMEOUT_MS,
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -87,6 +94,8 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  requestSequence += 1;
+  config.headers['X-Request-ID'] = `web-${Date.now()}-${requestSequence}`;
   return config;
 });
 

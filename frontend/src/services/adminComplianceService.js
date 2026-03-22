@@ -3,16 +3,34 @@ import { apiClient, normalizeApiError } from './apiClient';
 export const adminComplianceService = {
   async getKycQueue(params) {
     try {
-      const { data } = await apiClient.get('/admin/compliance/kyc-queue', { params });
+      const { data } = await apiClient.get('/risk/kyc-queue', { params });
       return data;
     } catch (error) {
       throw normalizeApiError(error);
     }
   },
 
-  async updateKyc(userId, payload) {
+  async getKyc(userId) {
     try {
-      const { data } = await apiClient.put(`/admin/compliance/kyc/${userId}`, payload);
+      const { data } = await apiClient.get(`/risk/kyc/${userId}`);
+      return data;
+    } catch (error) {
+      throw normalizeApiError(error);
+    }
+  },
+
+  async approveKyc(userId) {
+    try {
+      const { data } = await apiClient.post(`/risk/kyc/${userId}/approve`);
+      return data;
+    } catch (error) {
+      throw normalizeApiError(error);
+    }
+  },
+
+  async rejectKyc(userId, reason) {
+    try {
+      const { data } = await apiClient.post(`/risk/kyc/${userId}/reject`, { reason });
       return data;
     } catch (error) {
       throw normalizeApiError(error);

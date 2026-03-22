@@ -322,9 +322,10 @@ export function AppDataProvider({ children }) {
 
   const withdrawFunds = useCallback(async (payload) => {
     const result = await walletService.withdraw(payload);
+    await refreshWallet();
     updateWalletSnapshot(result.wallet, result.transaction);
     return result;
-  }, [updateWalletSnapshot]);
+  }, [refreshWallet, updateWalletSnapshot]);
 
   const sendWithdrawOtp = useCallback(async (payload) => {
     return walletService.sendWithdrawOtp(payload);
@@ -332,9 +333,16 @@ export function AppDataProvider({ children }) {
 
   const sendFunds = useCallback(async (payload) => {
     const result = await walletService.send(payload);
+    await refreshWallet();
     updateWalletSnapshot(result.wallet, result.transaction);
     return result;
-  }, [updateWalletSnapshot]);
+  }, [refreshWallet, updateWalletSnapshot]);
+
+  const depositFunds = useCallback(async (payload) => {
+    const result = await walletService.deposit(payload);
+    await refreshWallet();
+    return result;
+  }, [refreshWallet]);
 
   const requestFunds = useCallback(async (payload) => {
     return walletService.request(payload);
@@ -395,15 +403,13 @@ export function AppDataProvider({ children }) {
 
   const markNotificationRead = useCallback(async (notificationId) => {
     await notificationService.markRead(notificationId);
-    setNotifications((current) => current.map((item) => (item.id === notificationId ? { ...item, read: true } : item)));
-    setNotificationMeta((current) => ({ ...current, unreadCount: Math.max(0, current.unreadCount - 1) }));
-  }, []);
+    await refreshNotifications({ page: 1, limit: 5 });
+  }, [refreshNotifications]);
 
   const markAllNotificationsRead = useCallback(async () => {
     await notificationService.markAllRead();
-    setNotifications((current) => current.map((item) => ({ ...item, read: true })));
-    setNotificationMeta((current) => ({ ...current, unreadCount: 0 }));
-  }, []);
+    await refreshNotifications({ page: 1, limit: 5 });
+  }, [refreshNotifications]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -495,6 +501,7 @@ export function AppDataProvider({ children }) {
     sendWithdrawOtp,
     withdrawFunds,
     sendFunds,
+    depositFunds,
     requestFunds,
     createSavingsGoal,
     updateSavingsGoal,
@@ -541,6 +548,7 @@ export function AppDataProvider({ children }) {
     sendWithdrawOtp,
     withdrawFunds,
     sendFunds,
+    depositFunds,
     requestFunds,
     createSavingsGoal,
     updateSavingsGoal,

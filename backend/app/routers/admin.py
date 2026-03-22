@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import uuid
+from decimal import Decimal
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,7 @@ from ..models import Card as CardModel
 from ..models import Transaction as TransactionModel
 from ..models import User as UserModel
 from ..models import Wallet as WalletModel
+from ..services.ledger_service import ensure_system_account, ensure_user_wallet_account, post_ledger_transaction, sync_wallet_from_ledger
 from .dashboard_state import (
     SUPPORT_TICKET_STORE,
     get_budget_categories,
@@ -662,20 +664,31 @@ def adjust_balance(user_id: str, payload: BalanceAdjustRequest, admin: UserModel
     wallet = _ensure_wallet(user, db)
     if payload.adjustment_type == "deduct" and wallet.available_balance < payload.amount:
         raise HTTPException(status_code=400, detail=f"Cannot deduct {payload.amount:.2f}, current balance is only {wallet.available_balance:.2f}")
-    delta = payload.amount if payload.adjustment_type == "add" else -payload.amount
-    wallet.total_balance += delta
-    wallet.available_balance += delta
-    txn = TransactionModel(
-        user_id=user.id,
-        txn_id=f"TXN-ADJ-{uuid.uuid4().hex[:8].upper()}",
-        merchant="Admin Adjustment",
-        type="credit" if delta > 0 else "debit",
-        amount=abs(delta),
-        category="admin_adjustment",
-        note=payload.reason,
-        status="completed",
+
+    user_account = ensure_user_wallet_account(db, user.id, currency=wallet.currency or "USD", opening_balance=wallet.total_balance or 0.0)
+    treasury_account = ensure_system_account(db, "treasury", wallet.currency or "USD")
+    if payload.adjustment_type == "add":
+        ledger_entries = [
+            {"account_id": treasury_account.id, "entry_type": "debit", "amount": Decimal(str(payload.amount))},
+            {"account_id": user_account.id, "entry_type": "credit", "amount": Decimal(str(payload.amount))},
+        ]
+        transaction_type = "deposit"
+    else:
+        ledger_entries = [
+            {"account_id": user_account.id, "entry_type": "debit", "amount": Decimal(str(payload.amount))},
+            {"account_id": treasury_account.id, "entry_type": "credit", "amount": Decimal(str(payload.amount))},
+        ]
+        transaction_type = "refund"
+
+    post_ledger_transaction(
+        db=db,
+        entries=ledger_entries,
+        transaction_type=transaction_type,
+        reference_id=f"TXN-ADJ-{uuid.uuid4().hex[:8].upper()}",
+        currency=wallet.currency or "USD",
+        metadata={"merchant": "Admin Adjustment", "description": payload.reason, "admin_user_id": admin.id},
     )
-    db.add(txn)
+    sync_wallet_from_ledger(db, user.id, currency=wallet.currency or "USD")
     db.commit()
     _record_action(admin, "balance_adjustment", "wallet", user.id, {"amount": payload.amount, "adjustment_type": payload.adjustment_type, "reason": payload.reason}, target_user=user.email)
     return {"success": True, "user": _serialize_user(user, wallet), "wallet": {"balance": wallet.total_balance}}
@@ -689,19 +702,25 @@ def admin_deposit(payload: AdminDepositRequest, admin: UserModel = Depends(get_c
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Deposit amount must be greater than 0")
     wallet = _ensure_wallet(user, db)
-    wallet.total_balance += payload.amount
-    wallet.available_balance += payload.amount
-    txn = TransactionModel(
-        user_id=user.id,
-        txn_id=f"TXN-DEP-{uuid.uuid4().hex[:8].upper()}",
-        merchant=f"Admin deposit via {payload.payment_method}",
-        type="credit",
-        amount=payload.amount,
-        category="admin_deposit",
-        note=payload.admin_note or f"Admin deposit via {payload.payment_method}",
-        status="completed",
+    user_account = ensure_user_wallet_account(db, user.id, currency=wallet.currency or "USD", opening_balance=wallet.total_balance or 0.0)
+    treasury_account = ensure_system_account(db, "treasury", wallet.currency or "USD")
+    txn = post_ledger_transaction(
+        db=db,
+        entries=[
+            {"account_id": treasury_account.id, "entry_type": "debit", "amount": Decimal(str(payload.amount))},
+            {"account_id": user_account.id, "entry_type": "credit", "amount": Decimal(str(payload.amount))},
+        ],
+        transaction_type="deposit",
+        reference_id=f"TXN-DEP-{uuid.uuid4().hex[:8].upper()}",
+        currency=wallet.currency or "USD",
+        metadata={
+            "merchant": f"Admin deposit via {payload.payment_method}",
+            "description": payload.admin_note or f"Admin deposit via {payload.payment_method}",
+            "payment_method": payload.payment_method,
+            "admin_user_id": admin.id,
+        },
     )
-    db.add(txn)
+    sync_wallet_from_ledger(db, user.id, currency=wallet.currency or "USD")
     db.commit()
     if payload.email_receipt:
         send_email(
@@ -710,7 +729,7 @@ def admin_deposit(payload: AdminDepositRequest, admin: UserModel = Depends(get_c
             (
                 f"<p>Dear {user.first_name or user.email},</p>"
                 f"<p>Your ZANK wallet has been credited with <strong>${payload.amount:,.2f}</strong> via {payload.payment_method}.</p>"
-                f"<p>Reference: {payload.admin_note or 'N/A'}</p><p>Thank you.</p>"
+                f"<p>Reference: {payload.admin_note or txn.reference_id or 'N/A'}</p><p>Thank you.</p>"
             ),
         )
     _record_action(admin, "admin_deposit", "wallet", user.id, {"amount": payload.amount, "payment_method": payload.payment_method, "email_receipt": payload.email_receipt, "reference": payload.admin_note}, target_user=user.email)

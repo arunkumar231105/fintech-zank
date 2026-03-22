@@ -19,11 +19,11 @@ export default function AdminAudit() {
   const [filters, setFilters] = useState({
     page: 1,
     limit: 100,
-    action_type: 'all',
-    admin_user: '',
-    date_range: '',
-    entity_type: 'all',
-    search: '',
+    action: 'all',
+    actor: '',
+    resource_type: 'all',
+    from_date: '',
+    to_date: '',
   });
   const [searchInput, setSearchInput] = useState('');
   const [logs, setLogs] = useState([]);
@@ -34,7 +34,7 @@ export default function AdminAudit() {
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      setFilters((current) => ({ ...current, page: 1, search: searchInput.trim() }));
+      setFilters((current) => ({ ...current, page: 1, actor: searchInput.trim() }));
     }, 400);
     return () => window.clearTimeout(timeoutId);
   }, [searchInput]);
@@ -59,17 +59,18 @@ export default function AdminAudit() {
 
   const stats = useMemo(() => ({
     total: pagination.total || 0,
-    security: logs.filter((log) => String(log.action_type).includes('risk') || String(log.action_type).includes('kyc')).length,
-    settings: logs.filter((log) => log.entity_type === 'settings').length,
+    security: logs.filter((log) => String(log.action).includes('login') || String(log.action).includes('password') || String(log.action).includes('ledger')).length,
+    settings: logs.filter((log) => log.resource_type === 'settings').length,
   }), [logs, pagination.total]);
 
   const handleExport = async () => {
     try {
       const blob = await adminAuditService.exportLogs({
-        format: 'csv',
-        date_range: filters.date_range,
-        action_type: filters.action_type,
-        admin_user: filters.admin_user,
+        action: filters.action,
+        actor: filters.actor,
+        resource_type: filters.resource_type,
+        from_date: filters.from_date,
+        to_date: filters.to_date,
       });
       downloadBlob(blob, `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`);
     } catch (requestError) {
@@ -99,16 +100,16 @@ export default function AdminAudit() {
         <div className="flex gap-3 flex-wrap items-center">
           <div className="header-search-wrap" style={{ flex: 1, maxWidth: 320 }}>
             <Search size={15} color="var(--text-muted)" />
-            <input className="header-search-input" placeholder="Search entity ID or admin username..." value={searchInput} onChange={(event) => setSearchInput(event.target.value)} />
+            <input className="header-search-input" placeholder="Search actor..." value={searchInput} onChange={(event) => setSearchInput(event.target.value)} />
           </div>
-          <select className="form-input" style={{ width: 'auto' }} value={filters.action_type} onChange={(event) => setFilters((current) => ({ ...current, action_type: event.target.value, page: 1 }))}>
-            {['all', 'admin_deposit', 'status_change', 'balance_adjustment', 'kyc_review', 'settings_updated', 'support_ticket_updated', 'transaction_reversal', 'transaction_flagged', 'risk_rule_updated', 'risk_flag_updated', 'reconciliation_run'].map((value) => <option key={value} value={value}>{value}</option>)}
+          <select className="form-input" style={{ width: 'auto' }} value={filters.action} onChange={(event) => setFilters((current) => ({ ...current, action: event.target.value, page: 1 }))}>
+            {['all', 'ledger_post', 'ledger_reversal', 'user_login', 'user_logout', 'user_register', 'password_reset_request', 'password_reset_complete'].map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
-          <select className="form-input" style={{ width: 'auto' }} value={filters.entity_type} onChange={(event) => setFilters((current) => ({ ...current, entity_type: event.target.value, page: 1 }))}>
-            {['all', 'user', 'wallet', 'transaction', 'settings', 'support_ticket', 'risk_flag', 'risk_rule', 'reconciliation'].map((value) => <option key={value} value={value}>{value}</option>)}
+          <select className="form-input" style={{ width: 'auto' }} value={filters.resource_type} onChange={(event) => setFilters((current) => ({ ...current, resource_type: event.target.value, page: 1 }))}>
+            {['all', 'pending_registration', 'user', 'session', 'transaction'].map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
-          <input className="form-input" style={{ width: 'auto' }} placeholder="Admin email" value={filters.admin_user} onChange={(event) => setFilters((current) => ({ ...current, admin_user: event.target.value, page: 1 }))} />
-          <input className="form-input" style={{ width: 'auto' }} type="date" onChange={(event) => setFilters((current) => ({ ...current, date_range: event.target.value ? `${event.target.value},${event.target.value}` : '', page: 1 }))} />
+          <input className="form-input" style={{ width: 'auto' }} type="date" value={filters.from_date} onChange={(event) => setFilters((current) => ({ ...current, from_date: event.target.value, page: 1 }))} />
+          <input className="form-input" style={{ width: 'auto' }} type="date" value={filters.to_date} onChange={(event) => setFilters((current) => ({ ...current, to_date: event.target.value, page: 1 }))} />
         </div>
       </div>
 
@@ -116,21 +117,23 @@ export default function AdminAudit() {
         <div className="table-wrap">
           <table className="table">
             <thead>
-              <tr><th>Timestamp</th><th>Admin User</th><th>Action Type</th><th>Entity</th><th>Entity ID</th><th>IP Address</th><th>Details</th></tr>
+              <tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Resource</th><th>Resource ID</th><th>IP Address</th><th>Details</th></tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>Loading audit logs...</td></tr>
+              ) : logs.length === 0 ? (
+                <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>No audit logs found.</td></tr>
               ) : logs.map((log) => (
                 <React.Fragment key={log.id}>
                   <tr onClick={() => setExpanded((current) => current === log.id ? null : log.id)} style={{ cursor: 'pointer' }}>
                     <td>{formatDateTime(log.timestamp)}</td>
-                    <td>{log.admin_user}</td>
-                    <td><span className={`badge ${String(log.action_type).includes('updated') ? 'badge-blue' : String(log.action_type).includes('reversal') ? 'badge-danger' : 'badge-success'}`}>{log.action_type}</span></td>
-                    <td>{log.entity_type}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{log.entity_id}</td>
+                    <td>{log.actor || log.actor_email || 'System'}</td>
+                    <td><span className={`badge ${String(log.action).includes('reversal') ? 'badge-danger' : String(log.action).includes('password') ? 'badge-warning' : 'badge-success'}`}>{log.action}</span></td>
+                    <td>{log.resource_type}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{log.resource_id}</td>
                     <td>{log.ip_address}</td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{Object.keys(log.details || {}).slice(0, 2).join(', ') || 'View'}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{Object.keys(log.metadata || {}).slice(0, 2).join(', ') || 'View'}</td>
                   </tr>
                   {expanded === log.id && (
                     <tr>
@@ -145,7 +148,7 @@ export default function AdminAudit() {
                           <div>
                             <div className="stat-label">Details JSON</div>
                             <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-{JSON.stringify(log.details || {}, null, 2)}
+{JSON.stringify(log.metadata || {}, null, 2)}
                             </pre>
                           </div>
                         </div>

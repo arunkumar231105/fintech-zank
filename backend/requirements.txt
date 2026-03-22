@@ -16,3 +16,5 @@ redis>=5.0.1
 httpx>=0.25.1
 google-auth>=2.23.0
 requests>=2.31.0
+apscheduler>=3.10.0
+slowapi>=0.1.9

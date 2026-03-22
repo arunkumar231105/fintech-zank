@@ -1,31 +1,35 @@
-import os
 import secrets
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import httpx
 from urllib.parse import urlsplit
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..core.database import get_db
-from ..core.security import get_password_hash, verify_password, create_access_token, create_refresh_token
+from ..core.config import get_settings
+from ..core.security import blacklist_token, create_access_token, create_refresh_token, get_password_hash, verify_password
 from ..core.email_utils import send_email
 from ..models import User as UserModel, PendingRegistration, OTPCode, RefreshToken, Wallet, Card, PasswordResetToken
+from ..services.audit_service import log_audit_event
 from ..schemas import (
     UserCreate, AuthStatusResponse, LoginRequest, OTPVerifyRequest, 
     ForgotPasswordRequest, ResetPasswordRequest, LoginResponse, UserResponse
 )
-import uuid
+settings = get_settings()
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
 
 def get_frontend_base_url() -> str:
-    explicit = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+    explicit = settings.frontend_url.strip().rstrip("/")
     if explicit:
         return explicit
 
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/google/callback").strip()
+    redirect_uri = settings.google_redirect_uri.strip()
     parsed = urlsplit(redirect_uri)
     if parsed.scheme and parsed.netloc:
         return f"{parsed.scheme}://{parsed.netloc}"
@@ -39,8 +43,10 @@ def gen_otp():
     import random
     return str(random.randint(100000, 999999))
 
-@router.post("/register")
-def register(user: UserCreate, db: Session = Depends(get_db)):
+@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=AuthStatusResponse)
+@limiter.limit("3/minute")
+def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
+    user.email = user.email.strip().lower()
     # Check if email is already in users table
     if db.query(UserModel).filter(UserModel.email == user.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -71,13 +77,14 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     verify_url = f"{get_frontend_base_url()}/auth/verify-email?token={token}"
     html = f"<h3>Welcome to Zank AI!</h3><p>Please <a href='{verify_url}'>click here</a> to verify your email address. This link expires in 24 hours.</p>"
     send_email(user.email, "Verify your Zank AI Account", html)
+    log_audit_event(db, None, "user_register", "pending_registration", user.email, {"email": user.email}, request.client.host if request.client else None)
 
     return {"success": True, "message": "Verification email sent. Please check your inbox."}
 
 class VerifyEmailRequest(BaseModel):
     token: str
 
-@router.post("/verify-email")
+@router.post("/verify-email", response_model=AuthStatusResponse)
 def verify_email(req: VerifyEmailRequest, db: Session = Depends(get_db)):
     pending = db.query(PendingRegistration).filter(PendingRegistration.verification_token == req.token).first()
     
@@ -117,8 +124,10 @@ def verify_email(req: VerifyEmailRequest, db: Session = Depends(get_db)):
 
     return {"success": True, "message": "Email verified! You can now login."}
 
-@router.post("/login")
-def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+@router.post("/login", response_model=AuthStatusResponse)
+@limiter.limit("5/minute")
+def login(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    login_data.email = login_data.email.strip().lower()
     user = db.query(UserModel).filter(UserModel.email == login_data.email).first()
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
@@ -138,11 +147,14 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     # Send Email
     html = f"<h3>Your Login Code</h3><p>Your OTP code is: <strong>{code}</strong>. Valid for 10 minutes.</p>"
     send_email(user.email, "Zank AI - Login Code", html)
+    log_audit_event(db, user.id, "user_login", "user", user.id, {"email": user.email}, request.client.host if request.client else None)
 
     return {"success": True, "message": "OTP sent"}
 
 @router.post("/verify-otp", response_model=LoginResponse)
-def verify_otp(req: OTPVerifyRequest, response: Response, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def verify_otp(req: OTPVerifyRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    req.email = req.email.strip().lower()
     user = db.query(UserModel).filter(UserModel.email == req.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -171,8 +183,9 @@ def verify_otp(req: OTPVerifyRequest, response: Response, db: Session = Depends(
         value=refresh_token, 
         httponly=True, 
         max_age=7 * 24 * 60 * 60,
-        samesite="lax",
-        secure=False  # True in prod HTTPS
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
+        domain=settings.cookie_domain,
     )
 
     user_resp = UserResponse(
@@ -197,7 +210,7 @@ def verify_otp(req: OTPVerifyRequest, response: Response, db: Session = Depends(
         "user": user_resp
     }
 
-@router.post("/refresh-token")
+@router.post("/refresh-token", status_code=status.HTTP_200_OK)
 def refresh_token(request: Request, db: Session = Depends(get_db)):
     cookie_token = request.cookies.get("refresh_token")
     if not cookie_token:
@@ -214,19 +227,28 @@ def refresh_token(request: Request, db: Session = Depends(get_db)):
     access_token = create_access_token(data={"sub": user.id, "role": user.role})
     return {"accessToken": access_token}
 
-@router.post("/logout")
+@router.post("/logout", response_model=AuthStatusResponse)
 def logout(response: Response, request: Request, db: Session = Depends(get_db)):
     cookie_token = request.cookies.get("refresh_token")
+    actor_id = None
     if cookie_token:
         rt_record = db.query(RefreshToken).filter(RefreshToken.token == cookie_token).first()
         if rt_record:
+            actor_id = rt_record.user_id
             db.delete(rt_record)
             db.commit()
-    response.delete_cookie("refresh_token")
+    auth_header = request.headers.get("Authorization", "")
+    bearer_token = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+    if bearer_token:
+        blacklist_token(bearer_token, datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes))
+    response.delete_cookie("refresh_token", domain=settings.cookie_domain)
+    log_audit_event(db, actor_id, "user_logout", "session", actor_id or "anonymous", {}, request.client.host if request.client else None)
     return {"success": True, "message": "Logged out successfully"}
 
-@router.post("/forgot-password")
-def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+@router.post("/forgot-password", response_model=AuthStatusResponse)
+@limiter.limit("3/minute")
+def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
+    req.email = req.email.strip().lower()
     user = db.query(UserModel).filter(UserModel.email == req.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="No account found with this email")
@@ -264,17 +286,18 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     </div>
     """
     send_email(user.email, "Zank AI - Reset Your Password", html)
+    log_audit_event(db, user.id, "password_reset_request", "user", user.id, {"email": user.email}, request.client.host if request.client else None)
     return {"success": True, "message": "Password reset link sent to your email. Please check your inbox."}
 
-@router.get("/verify-reset-token/{token}")
+@router.get("/verify-reset-token/{token}", response_model=AuthStatusResponse)
 def verify_reset_token(token: str, db: Session = Depends(get_db)):
     pr_record = db.query(PasswordResetToken).filter(PasswordResetToken.token == token).first()
     if not pr_record or pr_record.used or pr_record.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="This link has expired. Please request a new one.")
     return {"success": True, "message": "Token is valid"}
 
-@router.post("/reset-password")
-def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+@router.post("/reset-password", response_model=AuthStatusResponse)
+def reset_password(req: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)):
     if req.new_password != req.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
         
@@ -289,15 +312,16 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     user.hashed_password = get_password_hash(req.new_password[:72])
     pr_record.used = True
     db.commit()
+    log_audit_event(db, user.id, "password_reset_complete", "user", user.id, {"email": user.email}, request.client.host if request.client else None)
     return {"success": True, "message": "Password reset successfully!"}
 
 class GoogleAuthReq(BaseModel):
     code: str
 
-@router.post("/google")
+@router.post("/google", status_code=status.HTTP_200_OK)
 def google_auth_generate_url():
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/google/callback")
+    client_id = settings.google_client_id
+    redirect_uri = settings.google_redirect_uri
     
     # Mock bypass if user hasn't set up actual Google Client ID yet for local testing
     if client_id == "your_google_client_id" or not client_id:
@@ -309,9 +333,9 @@ def google_auth_generate_url():
 
 @router.post("/google/callback", response_model=LoginResponse)
 def google_auth_callback(req: GoogleAuthReq, response: Response, db: Session = Depends(get_db)):
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/google/callback")
+    client_id = settings.google_client_id
+    client_secret = settings.google_client_secret
+    redirect_uri = settings.google_redirect_uri
     
     # Mock bypass handler for local testing
     if req.code == "mock_google_auth_code_for_local_testing":
@@ -379,7 +403,15 @@ def google_auth_callback(req: GoogleAuthReq, response: Response, db: Session = D
     db.add(rt_record)
     db.commit()
 
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, max_age=7*24*60*60, samesite="lax")
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        max_age=7 * 24 * 60 * 60,
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
+        domain=settings.cookie_domain,
+    )
 
     user_resp = UserResponse(
         email=user.email,
